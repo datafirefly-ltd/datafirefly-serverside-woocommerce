@@ -104,6 +104,14 @@ class DFSS_Event_Builder
             ),
         );
 
+        // Referring URL — optional; only forward when it satisfies the
+        // dispatcher's z.string().url() (pageReferrer). GA4 uses it to derive
+        // source/medium when no client-side session exists.
+        $page_referrer = isset($beacon['page_referrer']) ? (string) $beacon['page_referrer'] : '';
+        if ($page_referrer !== '' && filter_var($page_referrer, FILTER_VALIDATE_URL)) {
+            $payload['pageReferrer'] = $page_referrer;
+        }
+
         $event_data = self::beacon_event_data(
             isset($beacon['event_data']) && is_array($beacon['event_data']) ? $beacon['event_data'] : array()
         );
@@ -136,7 +144,7 @@ class DFSS_Event_Builder
         // Browser identifiers (cookies + click ids) — passed raw end-to-end.
         // Each is a free string in the schema; only emit when non-empty.
         // gclid is the Google Ads click id (opaque token, like ttclid).
-        foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'clientId') as $key) {
+        foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'clientId', 'sessionId') as $key) {
             if (!empty($in[$key]) && is_string($in[$key])) {
                 $u[$key] = $in[$key];
             }
@@ -346,6 +354,13 @@ class DFSS_Event_Builder
         if ($client_id !== '') {
             $u['clientId'] = $client_id;
         }
+        // GA4 session id captured at checkout (_ga_<container> cookie). Stitches
+        // the purchase onto the converting session so GA4 credits its real
+        // source/medium instead of reporting the conversion as "Unassigned".
+        $session_id = self::ga_session_id($order->get_meta('_dfss_ga_session'));
+        if ($session_id !== '') {
+            $u['sessionId'] = $session_id;
+        }
 
         return $u;
     }
@@ -411,5 +426,28 @@ class DFSS_Event_Builder
         }
 
         return $parts[count($parts) - 2] . '.' . $parts[count($parts) - 1];
+    }
+
+    /**
+     * Extract the GA4 session id from the _ga_<container> cookie value.
+     * "GS1.1.1712345678.3.1.1712345699.0.0.0" -> "1712345678".
+     *
+     * @param mixed $gs
+     *
+     * @return string '' if invalid.
+     */
+    private static function ga_session_id($gs)
+    {
+        if (!is_string($gs) || $gs === '') {
+            return '';
+        }
+        // _ga_<id> value is "GS1.1.<sessionId>.<n>..." (legacy, dot-separated)
+        // or "GS2.1.s<sessionId>$o<n>$..." (2024+ format, $-separated, s-prefixed).
+        // Capture the numeric sessionId in both; anything else degrades to ''.
+        if (preg_match('/^GS\d\.\d+\.s?(\d+)/', $gs, $m)) {
+            return $m[1];
+        }
+
+        return '';
     }
 }

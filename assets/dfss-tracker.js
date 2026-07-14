@@ -149,6 +149,22 @@
 				u.clientId = parts[parts.length - 2] + '.' + parts[parts.length - 1];
 			}
 		}
+		// GA4 session id — from the _ga_<container> cookie ("GS1.1.<sessionId>.<n>...").
+		// Sending it lets the server-side event join the SAME session gtag opened,
+		// so GA4 attributes it to that session's real source/medium instead of
+		// opening a sourceless session that reports as "Unassigned".
+		var mid = PUBLIC.ga4 && PUBLIC.ga4.measurementId;
+		if (mid) {
+			var gs = getCookie('_ga_' + String(mid).replace(/^G-/, ''));
+			if (gs) {
+				// _ga_<id> = "GS1.1.<sessionId>.<n>..." (legacy, dot-separated) OR
+				// "GS2.1.s<sessionId>$o<n>$..." (2024+ format, $-separated, s-prefixed).
+				// The capture group takes the numeric sessionId in both; a non-match
+				// leaves sessionId unset (graceful) rather than shipping garbage.
+				var m = gs.match(/^GS\d\.\d+\.s?(\d+)/);
+				if (m) { u.sessionId = m[1]; }
+			}
+		}
 		return u;
 	}
 
@@ -514,6 +530,13 @@
 			user_data: collectUserData(),
 			event_data: beaconData || {}
 		};
+		// Referring URL — lets GA4 derive source/medium when no client-side
+		// session exists (ad-blocked gtag). Only forward a real external http(s)
+		// referrer; empty/internal referrers add nothing.
+		var ref = document.referrer;
+		if (ref && /^https?:\/\//i.test(ref)) {
+			body.page_referrer = ref;
+		}
 		var payload = JSON.stringify(body);
 
 		// sendBeacon survives page unload (key for purchase on the thank-you

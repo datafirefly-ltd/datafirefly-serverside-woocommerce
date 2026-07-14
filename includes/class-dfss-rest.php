@@ -229,6 +229,10 @@ class DFSS_REST
             ? esc_url_raw(wp_unslash((string) $body['source_url']))
             : '';
 
+        $page_referrer = isset($body['page_referrer'])
+            ? esc_url_raw(wp_unslash((string) $body['page_referrer']))
+            : '';
+
         $user_data = $this->sanitize_user_data(
             isset($body['user_data']) && is_array($body['user_data']) ? $body['user_data'] : array()
         );
@@ -240,6 +244,7 @@ class DFSS_REST
             'event_name' => $event_name,
             'event_id' => $event_id,
             'source_url' => $source_url,
+            'page_referrer' => $page_referrer,
             'user_data' => $user_data,
             'event_data' => $event_data,
         );
@@ -281,7 +286,7 @@ class DFSS_REST
         $out = array();
         // Cookie/click identifiers only. clientId is the GA _ga value; gclid is
         // the Google Ads click id (opaque token, like ttclid).
-        foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'clientId') as $key) {
+        foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'clientId', 'sessionId') as $key) {
             if (!empty($in[$key]) && is_scalar($in[$key])) {
                 $val = sanitize_text_field(wp_unslash((string) $in[$key]));
                 if ($val !== '' && strlen($val) <= 256) {
