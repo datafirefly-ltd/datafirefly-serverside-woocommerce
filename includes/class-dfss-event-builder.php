@@ -136,7 +136,7 @@ class DFSS_Event_Builder
         // Browser identifiers (cookies + click ids) — passed raw end-to-end.
         // Each is a free string in the schema; only emit when non-empty.
         // gclid is the Google Ads click id (opaque token, like ttclid).
-        foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'clientId') as $key) {
+        foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'gbraid', 'wbraid', 'msclkid', 'clientId') as $key) {
             if (!empty($in[$key]) && is_string($in[$key])) {
                 $u[$key] = $in[$key];
             }
@@ -337,10 +337,14 @@ class DFSS_Event_Builder
         if ($ttp) {
             $u['ttp'] = $ttp;
         }
-        // Google Ads click id, captured at checkout (see capture_cookies()).
-        $gclid = $order->get_meta('_dfss_gclid');
-        if ($gclid) {
-            $u['gclid'] = $gclid;
+        // Click identifiers captured at checkout (see capture_cookies()). The
+        // dispatcher picks the Google one it can use (gclid > wbraid > gbraid)
+        // and forwards msclkid to Microsoft Advertising.
+        foreach (array('ttclid', 'gclid', 'gbraid', 'wbraid', 'msclkid') as $click_id) {
+            $value = $order->get_meta('_dfss_' . $click_id);
+            if ($value) {
+                $u[$click_id] = $value;
+            }
         }
         $client_id = self::ga_client_id($order->get_meta('_dfss_ga'));
         if ($client_id !== '') {

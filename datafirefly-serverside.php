@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name:       DataFirefly Server-Side
- * Description:       Complete WooCommerce tracking — client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.2.0
+ * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
+ * Version:           2.3.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.2.0');
+define('DFSS_VERSION', '2.3.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -252,7 +252,18 @@ class DFSS_Plugin
         // Also persist our captured click-id cookies (90-day first-party) so the
         // server purchase event carries fbc/ttclid/gclid even if the live pixel
         // cookie is absent.
-        $extra = array('_dfss_fbc' => '_dfss_fbc', '_dfss_ttclid' => '_dfss_ttclid', '_dfss_gclid' => '_dfss_gclid');
+        // gbraid and wbraid are issued INSTEAD of gclid when the journey crosses
+        // an app boundary or cookies are restricted, and msclkid is what
+        // Microsoft Advertising attributes on: a purchase carrying one of those
+        // and not gclid is still a paid click.
+        $extra = array(
+            '_dfss_fbc' => '_dfss_fbc',
+            '_dfss_ttclid' => '_dfss_ttclid',
+            '_dfss_gclid' => '_dfss_gclid',
+            '_dfss_gbraid' => '_dfss_gbraid',
+            '_dfss_wbraid' => '_dfss_wbraid',
+            '_dfss_msclkid' => '_dfss_msclkid',
+        );
         foreach ($extra as $cookie => $meta) {
             if (!empty($_COOKIE[$cookie]) && !$order->get_meta($meta)) {
                 $order->update_meta_data($meta, sanitize_text_field(wp_unslash($_COOKIE[$cookie])));
@@ -724,7 +735,7 @@ class DFSS_Plugin
 
         if ($just_connected) {
             if ($connection_ok) {
-                $msg = __('Connected! Your shop is live — a test event just reached DataFirefly.', 'datafirefly-serverside');
+                $msg = __('Connected! Your shop is live, a test event just reached DataFirefly.', 'datafirefly-serverside');
                 if (is_array($pub) && !empty($pub['ok'])) {
                     $dests = $this->describe_destinations($this->filtered_public_config($pub['public'], $opts));
                     if ($dests !== '') {
@@ -746,10 +757,10 @@ class DFSS_Plugin
             add_settings_error('dfss', 'test_ok', sprintf(__('Test event delivered (HTTP %d).', 'datafirefly-serverside'), $code), 'updated');
         } elseif ($connection_ok) {
             /* translators: %d: HTTP status code returned by the dispatcher. */
-            add_settings_error('dfss', 'test_partial', sprintf(__('Reached DataFirefly (HTTP %d) — a destination rejected the test event. Your connection is fine.', 'datafirefly-serverside'), $code), 'updated');
+            add_settings_error('dfss', 'test_partial', sprintf(__('Reached DataFirefly (HTTP %d): a destination rejected the test event. Your connection is fine.', 'datafirefly-serverside'), $code), 'updated');
         } else {
             /* translators: 1: HTTP status code, 2: error message from the dispatcher. */
-            add_settings_error('dfss', 'test_ko', sprintf(__('Test failed: HTTP %1$d — %2$s', 'datafirefly-serverside'), $code, esc_html($result['message'])), 'error');
+            add_settings_error('dfss', 'test_ko', sprintf(__('Test failed: HTTP %1$d, %2$s', 'datafirefly-serverside'), $code, esc_html($result['message'])), 'error');
         }
     }
 
@@ -794,7 +805,7 @@ class DFSS_Plugin
                 <div class="notice notice-success inline" style="margin:16px 0;">
                     <p style="font-size:14px;">
                         <span class="dashicons dashicons-yes-alt" style="color:#008D9E;"></span>
-                        <strong><?php esc_html_e('Connected', 'datafirefly-serverside'); ?></strong> —
+                        <strong><?php esc_html_e('Connected', 'datafirefly-serverside'); ?></strong> :
                         <?php esc_html_e('tracking is sent to', 'datafirefly-serverside'); ?>
                         <code><?php echo esc_html($o['tenant_id']); ?></code>.
                         <?php
@@ -849,7 +860,7 @@ class DFSS_Plugin
                                         <input type="checkbox" name="dfss_<?php echo esc_attr($dfss_key); ?>" value="1" <?php checked(1, (int) $o[$dfss_key]); ?> />
                                         <?php echo esc_html($dfss_info[0]); ?>
                                         <?php if (!$dfss_info[1]) : ?>
-                                            <em class="description">— <?php esc_html_e('not configured on your DataFirefly account', 'datafirefly-serverside'); ?></em>
+                                            <em class="description">(<?php esc_html_e('not configured on your DataFirefly account', 'datafirefly-serverside'); ?>)</em>
                                         <?php endif; ?>
                                     </label>
                                 <?php endforeach; ?>
@@ -882,7 +893,7 @@ class DFSS_Plugin
             <?php else : ?>
                 <div class="card" style="max-width:620px;padding:8px 24px 24px;margin-top:16px;">
                     <h2><?php esc_html_e('Connect your shop', 'datafirefly-serverside'); ?></h2>
-                    <p class="description" style="font-size:13px;"><?php esc_html_e('Paste the connection key from your DataFirefly client space (Connect your shop). That is the only step — we configure client and server tracking for you.', 'datafirefly-serverside'); ?></p>
+                    <p class="description" style="font-size:13px;"><?php esc_html_e('Paste the connection key from your DataFirefly client space (Connect your shop). That is the only step: we configure client and server tracking for you.', 'datafirefly-serverside'); ?></p>
                     <form method="post" action="">
                         <?php wp_nonce_field('dfss_save', 'dfss_nonce'); ?>
                         <p>
@@ -976,7 +987,7 @@ class DFSS_Plugin
                     <?php echo $this->activity_rows_html(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- every value is escaped inside activity_rows_html(). ?>
                 </tbody>
             </table>
-            <p class="description" style="margin-top:8px;"><?php esc_html_e('Updates automatically every 30 seconds. The client side fires the browser pixel; the server side is the ad-blocker-proof delivery — both share one event id for deduplication.', 'datafirefly-serverside'); ?></p>
+            <p class="description" style="margin-top:8px;"><?php esc_html_e('Updates automatically every 30 seconds. The client side fires the browser pixel; the server side is the ad-blocker-proof delivery, and both share one event id for deduplication.', 'datafirefly-serverside'); ?></p>
         </div>
         <?php
     }

@@ -281,7 +281,7 @@ class DFSS_REST
         $out = array();
         // Cookie/click identifiers only. clientId is the GA _ga value; gclid is
         // the Google Ads click id (opaque token, like ttclid).
-        foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'clientId') as $key) {
+        foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'gbraid', 'wbraid', 'msclkid', 'clientId') as $key) {
             if (!empty($in[$key]) && is_scalar($in[$key])) {
                 $val = sanitize_text_field(wp_unslash((string) $in[$key]));
                 if ($val !== '' && strlen($val) <= 256) {

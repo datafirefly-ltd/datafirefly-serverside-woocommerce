@@ -119,6 +119,21 @@
 		if (gclid) {
 			setCookie('_dfss_gclid', gclid, COOKIE_DAYS);
 		}
+		// Google issues gbraid or wbraid INSTEAD of gclid when the journey
+		// crosses an app boundary or cookies are restricted. Same landing, same
+		// cookie lifetime: whichever one arrives is the one that attributes.
+		var gbraid = getParam('gbraid');
+		if (gbraid) {
+			setCookie('_dfss_gbraid', gbraid, COOKIE_DAYS);
+		}
+		var wbraid = getParam('wbraid');
+		if (wbraid) {
+			setCookie('_dfss_wbraid', wbraid, COOKIE_DAYS);
+		}
+		var msclkid = getParam('msclkid');
+		if (msclkid) {
+			setCookie('_dfss_msclkid', msclkid, COOKIE_DAYS);
+		}
 		var ttclid = getParam('ttclid');
 		if (ttclid) {
 			setCookie('_dfss_ttclid', ttclid, COOKIE_DAYS);
@@ -141,6 +156,12 @@
 		if (ttclid) { u.ttclid = ttclid; }
 		var gclid = getCookie('_dfss_gclid');
 		if (gclid) { u.gclid = gclid; }
+		var gbraid = getCookie('_dfss_gbraid');
+		if (gbraid) { u.gbraid = gbraid; }
+		var wbraid = getCookie('_dfss_wbraid');
+		if (wbraid) { u.wbraid = wbraid; }
+		var msclkid = getCookie('_dfss_msclkid');
+		if (msclkid) { u.msclkid = msclkid; }
 		var ga = getCookie('_ga');
 		if (ga) {
 			// _ga is "GA1.2.<clientId>"; the dispatcher wants the <clientId> part.
