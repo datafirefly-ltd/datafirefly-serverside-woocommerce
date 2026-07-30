@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.4.0
+ * Version:           2.5.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.4.0');
+define('DFSS_VERSION', '2.5.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -27,6 +27,7 @@ require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-event-builder.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-consent.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-queue.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-rest.php';
+require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-truth.php';
 
 // Declare WooCommerce HPOS (custom order tables) compatibility.
 add_action('before_woocommerce_init', function () {
@@ -70,6 +71,7 @@ class DFSS_Plugin
         // --- retry cron (new) ---
         add_filter('cron_schedules', array($this, 'cron_schedules'));
         add_action(DFSS_Queue::CRON_HOOK, array($this, 'run_retry'));
+        add_action(DFSS_Truth::CRON_HOOK, array($this, 'run_truth'));
         // Make sure the schedule survives even if activation predates the cron.
         add_action('init', array(__CLASS__, 'ensure_cron'));
     }
@@ -80,16 +82,19 @@ class DFSS_Plugin
     {
         DFSS_Queue::install();
         DFSS_Queue::schedule_cron();
+        DFSS_Truth::schedule_cron();
     }
 
     public static function deactivate()
     {
         DFSS_Queue::unschedule_cron();
+        DFSS_Truth::unschedule_cron();
     }
 
     public static function ensure_cron()
     {
         DFSS_Queue::schedule_cron();
+        DFSS_Truth::schedule_cron();
     }
 
     /**
@@ -139,6 +144,22 @@ class DFSS_Plugin
             return;
         }
         DFSS_Queue::process_due($o['tenant_id'], $o['hmac_secret'], $o['endpoint']);
+    }
+
+    /**
+     * Daily: tell the dispatcher what the shop actually sold yesterday.
+     *
+     * Runs whether or not anything sold — a day with zero orders is real data,
+     * and a gap in the reference table reads as a day we failed to measure
+     * rather than a day nobody bought.
+     */
+    public function run_truth()
+    {
+        $o = $this->opts();
+        if (empty($o['enabled']) || $o['tenant_id'] === '' || $o['hmac_secret'] === '') {
+            return;
+        }
+        DFSS_Truth::run($o, new DFSS_Client($o['tenant_id'], $o['hmac_secret'], $o['endpoint']));
     }
 
     // ---- options ------------------------------------------------------------

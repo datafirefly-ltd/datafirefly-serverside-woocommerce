@@ -102,6 +102,46 @@ class DFSS_Client
      *
      * @return string
      */
+    /**
+     * Send the shop's daily totals to POST /v1/truth, sibling of the events
+     * endpoint and signed the same way. Allowed to fail: nothing is lost, the
+     * next daily run sends the day again.
+     *
+     * @param array $payload {date, orders, revenue, currency, refunds?, refundAmount?, timezone?}
+     *
+     * @return array{ok: bool, code: int, message: string}
+     */
+    public function send_truth(array $payload)
+    {
+        if ($this->tenant_id === '' || $this->secret === '' || $this->endpoint === '') {
+            return array('ok' => false, 'code' => 0, 'message' => 'not_configured');
+        }
+        $body = wp_json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($body)) {
+            return array('ok' => false, 'code' => 0, 'message' => 'json_encode_failed');
+        }
+
+        return $this->request($this->sibling_url('/v1/truth'), $body, 8);
+    }
+
+    /**
+     * A path on the same host as the events endpoint.
+     */
+    private function sibling_url($path)
+    {
+        $endpoint = $this->endpoint;
+        if (substr($endpoint, -strlen('/v1/events')) === '/v1/events') {
+            return substr($endpoint, 0, strlen($endpoint) - strlen('/v1/events')) . $path;
+        }
+        $parts = wp_parse_url($endpoint);
+        if (empty($parts['scheme']) || empty($parts['host'])) {
+            return '';
+        }
+        $port = isset($parts['port']) ? ':' . (int) $parts['port'] : '';
+
+        return $parts['scheme'] . '://' . $parts['host'] . $port . $path;
+    }
+
     private function public_config_url()
     {
         $endpoint = $this->endpoint;
