@@ -68,6 +68,28 @@ class DFSS_Event_Builder
      *
      * @return array|null Null if the beacon can't be mapped (caller drops it).
      */
+
+    /**
+     * What the shop's consent layer decided for this event.
+     *
+     * We only build a payload once has_consent() said yes, but that yes covers
+     * two different situations: gating is ON and the visitor accepted, or
+     * gating is switched OFF and nothing was checked. Reporting both as
+     * 'granted' would make the field false exactly where it exists to be
+     * verifiable. The option is read through DFSS_Consent::is_required() so the
+     * "ON by default on a fresh install" rule stays in one place.
+     *
+     * @return string 'granted'|'not_required'
+     */
+    private static function consent_state()
+    {
+        $opts = get_option(DFSS_Plugin::OPTION, array());
+
+        return DFSS_Consent::is_required(is_array($opts) ? $opts : array())
+            ? 'granted'
+            : 'not_required';
+    }
+
     public static function build_from_beacon(array $beacon, $client_ip = '', $client_ua = '')
     {
         $event_name = isset($beacon['event_name']) ? (string) $beacon['event_name'] : '';
@@ -97,6 +119,7 @@ class DFSS_Event_Builder
             'eventTime' => time(),
             'sourceUrl' => $source_url,
             'actionSource' => 'website',
+            'consent' => self::consent_state(),
             'userData' => self::beacon_user_data(
                 isset($beacon['user_data']) && is_array($beacon['user_data']) ? $beacon['user_data'] : array(),
                 (string) $client_ip,
@@ -260,6 +283,7 @@ class DFSS_Event_Builder
             'eventTime' => $event_time,
             'sourceUrl' => home_url('/'),
             'actionSource' => 'website',
+            'consent' => self::consent_state(),
             'userData' => self::user_data($order),
         );
 

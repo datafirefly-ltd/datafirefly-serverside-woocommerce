@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.3.0
+ * Version:           2.4.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.3.0');
+define('DFSS_VERSION', '2.4.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -723,6 +723,9 @@ class DFSS_Plugin
             'eventTime' => time(),
             'sourceUrl' => home_url('/'),
             'actionSource' => 'website',
+            // Deliberately no 'consent': there is no visitor here, so there is
+            // no consent decision to report. Recorded as 'unknown', which is
+            // exactly what it is.
             'userData' => array('clientUserAgent' => 'DataFirefly-Test'),
         );
 
