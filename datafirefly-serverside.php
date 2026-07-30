@@ -269,6 +269,24 @@ class DFSS_Plugin
                 $order->update_meta_data($meta, sanitize_text_field(wp_unslash($_COOKIE[$cookie])));
             }
         }
+        // GA4 session cookie: its name is _ga_<measurementId without the G-
+        // prefix>. Derive it from OUR configured measurement id so we capture the
+        // session of our own property — never a stray _ga_* from another GA4
+        // stream that may also be on the page. The purchase then carries the
+        // session_id and GA4 attributes the conversion to the converting
+        // session's source instead of reporting it as "Unassigned".
+        if (!$order->get_meta('_dfss_ga_session')) {
+            $public = $this->public_config();
+            $mid = isset($public['ga4']['measurementId'])
+                ? (string) $public['ga4']['measurementId']
+                : '';
+            if ($mid !== '') {
+                $cookie_name = '_ga_' . preg_replace('/^G-/', '', $mid);
+                if (!empty($_COOKIE[$cookie_name])) {
+                    $order->update_meta_data('_dfss_ga_session', sanitize_text_field(wp_unslash($_COOKIE[$cookie_name])));
+                }
+            }
+        }
     }
 
     /**
