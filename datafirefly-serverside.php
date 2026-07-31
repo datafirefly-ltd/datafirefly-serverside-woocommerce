@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.5.0
+ * Version:           2.6.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -61,6 +61,10 @@ class DFSS_Plugin
         add_action('woocommerce_payment_complete', array($this, 'on_purchase'));
         add_action('woocommerce_order_status_processing', array($this, 'on_purchase'));
         add_action('woocommerce_order_status_completed', array($this, 'on_purchase'));
+        // Refunds. `woocommerce_order_refunded` fires for both a partial and a
+        // full refund, and passes the refund id — which is what makes each one
+        // a distinct, deduplicable event.
+        add_action('woocommerce_order_refunded', array($this, 'on_refund'), 10, 2);
 
         // --- client tracking layer (new in v2.0, additive + gated) ---
         add_action('wp_enqueue_scripts', array($this, 'enqueue_tracker'));
@@ -356,6 +360,51 @@ class DFSS_Plugin
         } catch (\Throwable $e) {
             if (function_exists('wc_get_logger')) {
                 wc_get_logger()->warning('DataFirefly send failed: ' . $e->getMessage(), array('source' => 'datafirefly-serverside'));
+            }
+        }
+    }
+
+    /**
+     * A refund was issued on an order.
+     *
+     * Deliberately not gated on consent and carrying no personal data (see
+     * DFSS_Event_Builder::build_refund). There is no visitor here: this is the
+     * merchant's own back-office correction. Gating it would mean a shop with
+     * consent required reports its sales and silently swallows their
+     * reversals, which is worse than reporting neither.
+     *
+     * Keyed on the REFUND id, not the order: two partial refunds on one order
+     * are two real events, and replaying the same one must deduplicate.
+     */
+    public function on_refund($order_id, $refund_id)
+    {
+        try {
+            $opts = $this->opts();
+            if (empty($opts['enabled'])) {
+                return;
+            }
+            $refund = wc_get_order($refund_id);
+            $order = wc_get_order($order_id);
+            if (!$refund || !$order) {
+                return;
+            }
+
+            $payload = DFSS_Event_Builder::build_refund($refund, $order);
+            if (null === $payload) {
+                return;
+            }
+
+            $client = new DFSS_Client($opts['tenant_id'], $opts['hmac_secret'], $opts['endpoint']);
+            $result = $client->send($payload);
+            DFSS_Queue::record_attempt($payload, $result, 'server');
+
+            if (empty($result['ok'])) {
+                $order->add_order_note('DataFirefly: refund event not delivered (HTTP ' . (int) $result['code'] . '). Queued for retry.');
+                $order->save();
+            }
+        } catch (\Throwable $e) {
+            if (function_exists('wc_get_logger')) {
+                wc_get_logger()->warning('DataFirefly refund send failed: ' . $e->getMessage(), array('source' => 'datafirefly-serverside'));
             }
         }
     }

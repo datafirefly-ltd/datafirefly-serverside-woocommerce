@@ -276,6 +276,59 @@ class DFSS_Event_Builder
      *
      * @return array|null Null if the order can't be mapped (caller skips send).
      */
+    /**
+     * Build the `refund` event from a WooCommerce refund object.
+     *
+     * Carries NO personal data, unlike build_purchase(). A refund reverses a
+     * CONVERSION, and every platform that can act on one matches it by
+     * transaction id: GA4 keys its `refund` event on `transaction_id`, and
+     * Meta skips refunds because it has no purchase-reversal event. Nobody
+     * needs identifying again to undo a sale, so nobody is.
+     *
+     * The amount is POSITIVE. WooCommerce stores refund totals as negative
+     * numbers; the event name already carries the direction, and a negative on
+     * top of it is a double negative each platform resolves differently.
+     *
+     * @param WC_Order_Refund $refund
+     * @param WC_Order        $order
+     *
+     * @return array|null
+     */
+    public static function build_refund($refund, $order)
+    {
+        if (!is_a($refund, 'WC_Order_Refund') || !$order instanceof WC_Order) {
+            return null;
+        }
+
+        $amount = abs((float) $refund->get_amount());
+        if ($amount <= 0) {
+            return null;
+        }
+
+        $created = $refund->get_date_created();
+        $event_time = $created ? $created->getTimestamp() : time();
+
+        return array(
+            // The refund id, not the order id: two partial refunds on one
+            // order are two real events.
+            'eventId' => 'refund_' . (int) $refund->get_id(),
+            'eventName' => 'refund',
+            'eventTime' => $event_time,
+            'sourceUrl' => home_url('/'),
+            // Not 'website': nobody was on the site. A back-office correction.
+            'actionSource' => 'system_generated',
+            // No personal data and no visitor to ask, so nothing for a consent
+            // gate to decide. Saying 'granted' would claim an agreement nobody
+            // ever gave.
+            'consent' => 'not_required',
+            'eventData' => array(
+                'value' => round($amount, 2),
+                'currency' => $order->get_currency(),
+                'orderId' => (string) $order->get_order_number(),
+            ),
+        );
+    }
+
     public static function build_purchase($order)
     {
         if (!$order instanceof WC_Order) {
