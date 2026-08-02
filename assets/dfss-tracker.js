@@ -491,26 +491,22 @@
 		if (!injected.ga4 || typeof window.gtag !== 'function') {
 			return;
 		}
-		var gaName = GA4_MAP[name];
-		if (!gaName) {
-			return;
-		}
-		// DEDUP: GA4 only deduplicates on transaction_id, and ONLY for purchase.
-		// A custom event_id param is NOT a GA4 dedup key, so firing a client GA4
-		// event for top-of-funnel here would double-count against the server-side
-		// GA4 (Measurement Protocol) event. So client-side GA4 fires PURCHASE only;
-		// the server is the single source for GA4 page_view/view_item/etc. The GA4
-		// tag still loaded (injectGa4) so the _ga cookie exists for server matching.
-		if (name !== 'purchase' || !data || !data.orderId) {
-			return;
-		}
-		var params = { transaction_id: String(data.orderId) };
-		if (typeof data.value === 'number') { params.value = data.value; }
-		if (data.currency) { params.currency = data.currency; }
-		if (data.items && data.items.length) { params.items = data.items; }
-		try {
-			window.gtag('event', gaName, params);
-		} catch (e) {}
+		// Client-side GA4 fires NOTHING. Not even purchase.
+		//
+		// This used to fire purchase, on the belief that "GA4 deduplicates on
+		// transaction_id". Production disproved it: on datafirefly.com,
+		// transaction 13945 came back from the GA4 Data API as
+		// ecommercePurchases = 2 with revenue 298, exactly twice the 149 we
+		// sent. The transaction_id WAS present and identical on both paths —
+		// GA4 simply does not deduplicate a gtag event against a Measurement
+		// Protocol one. Every sale was counted twice, and the merchant's
+		// reported revenue with it.
+		//
+		// The server-side event is the single source for GA4. The gtag tag is
+		// still injected (injectGa4) because the _ga cookie it sets is what
+		// lets the server-side event join the same session — that is the only
+		// reason the tag is there.
+		return;
 	}
 
 	function fireTikTok(name, eventId, data) {
