@@ -167,7 +167,7 @@ class DFSS_Event_Builder
         // Browser identifiers (cookies + click ids) — passed raw end-to-end.
         // Each is a free string in the schema; only emit when non-empty.
         // gclid is the Google Ads click id (opaque token, like ttclid).
-        foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'gbraid', 'wbraid', 'msclkid', 'clientId', 'sessionId') as $key) {
+        foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'gbraid', 'wbraid', 'msclkid', 'oppref', 'obref', 'clientId', 'sessionId') as $key) {
             if (!empty($in[$key]) && is_string($in[$key])) {
                 $u[$key] = $in[$key];
             }
@@ -430,6 +430,15 @@ class DFSS_Event_Builder
             if ($value) {
                 $u[$click_id] = $value;
             }
+        }
+        // ChatGPT Ads attribution ids, captured at checkout (see capture_cookies()).
+        $oppref = $order->get_meta('_dfss_oppref');
+        if ($oppref) {
+            $u['oppref'] = $oppref;
+        }
+        $obref = $order->get_meta('_dfss_obref');
+        if ($obref) {
+            $u['obref'] = $obref;
         }
         $client_id = self::ga_client_id($order->get_meta('_dfss_ga'));
         if ($client_id !== '') {

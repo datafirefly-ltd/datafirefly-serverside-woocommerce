@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.7.0
+ * Version:           2.8.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.7.0');
+define('DFSS_VERSION', '2.8.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -268,7 +268,7 @@ class DFSS_Plugin
      */
     public function capture_cookies($order, $data)
     {
-        $map = array('_fbp' => '_dfss_fbp', '_fbc' => '_dfss_fbc', '_ga' => '_dfss_ga', '_ttp' => '_dfss_ttp');
+        $map = array('_fbp' => '_dfss_fbp', '_fbc' => '_dfss_fbc', '_ga' => '_dfss_ga', '_ttp' => '_dfss_ttp', '__oppref' => '_dfss_oppref', '__obref' => '_dfss_obref');
         foreach ($map as $cookie => $meta) {
             if (!empty($_COOKIE[$cookie])) {
                 $order->update_meta_data($meta, sanitize_text_field(wp_unslash($_COOKIE[$cookie])));
@@ -288,6 +288,7 @@ class DFSS_Plugin
             '_dfss_gbraid' => '_dfss_gbraid',
             '_dfss_wbraid' => '_dfss_wbraid',
             '_dfss_msclkid' => '_dfss_msclkid',
+            '_dfss_oppref' => '_dfss_oppref',
         );
         foreach ($extra as $cookie => $meta) {
             if (!empty($_COOKIE[$cookie]) && !$order->get_meta($meta)) {

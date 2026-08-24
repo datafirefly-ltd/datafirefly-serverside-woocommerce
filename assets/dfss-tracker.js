@@ -138,6 +138,12 @@
 		if (ttclid) {
 			setCookie('_dfss_ttclid', ttclid, COOKIE_DAYS);
 		}
+		// ChatGPT Ads attribution id. The OAIQ pixel stores it itself in
+		// __oppref (720h); our copy covers shops that run without the pixel.
+		var oppref = getParam('oppref');
+		if (oppref) {
+			setCookie('_dfss_oppref', oppref, COOKIE_DAYS);
+		}
 	}
 
 	// Read the browser identifiers we have available client-side. These are also
@@ -162,6 +168,11 @@
 		if (wbraid) { u.wbraid = wbraid; }
 		var msclkid = getCookie('_dfss_msclkid');
 		if (msclkid) { u.msclkid = msclkid; }
+		// Prefer the live __oppref cookie set by the OAIQ pixel; fall back to ours.
+		var oppref = getCookie('__oppref') || getCookie('_dfss_oppref');
+		if (oppref) { u.oppref = oppref; }
+		var obref = getCookie('__obref');
+		if (obref) { u.obref = obref; }
 		var ga = getCookie('_ga');
 		if (ga) {
 			// _ga is "GA1.2.<clientId>"; the dispatcher wants the <clientId> part.
@@ -305,7 +316,7 @@
 
 	// ---- client tag injection (PUBLIC ids only) -----------------------------
 
-	var injected = { meta: false, ga4: false, tiktok: false };
+	var injected = { meta: false, ga4: false, tiktok: false, oaiq: false };
 
 	function injectMeta() {
 		if (injected.meta || !PUBLIC.meta || !PUBLIC.meta.pixelId) {
@@ -419,10 +430,36 @@
 		return true;
 	}
 
+	function injectOaiq() {
+		if (injected.oaiq || !PUBLIC.openai || !PUBLIC.openai.pixelId) {
+			return injected.oaiq;
+		}
+		// AUGMENT, NOT REPLACE: if the OAIQ SDK (or its queue stub) is already
+		// on the page, reuse it and skip our own init — a second init for the
+		// same pixel would double-count. Official queue stub otherwise.
+		var preExisting = (typeof window.oaiq === 'function');
+		if (!preExisting) {
+			var q = function () { q.q.push(arguments); };
+			q.q = [];
+			window.oaiq = q;
+			loadScript('https://bzrcdn.openai.com/sdk/oaiq.min.js');
+		}
+		// The OAIQ pixel defaults to consent=true; injectAll() only ever runs
+		// AFTER our own marketing-consent gate, so init here is compliant.
+		if (!preExisting) {
+			try {
+				window.oaiq('init', { pixelId: String(PUBLIC.openai.pixelId) });
+			} catch (e) {}
+		}
+		injected.oaiq = true;
+		return true;
+	}
+
 	function injectAll() {
 		injectMeta();
 		injectGa4();
 		injectTikTok();
+		injectOaiq();
 		// Pinterest is intentionally not injected client-side in v2.0 (the
 		// dispatcher handles Pinterest server-side; no light client tag needed).
 	}
@@ -528,10 +565,60 @@
 		} catch (e) {}
 	}
 
+	var OAIQ_MAP = {
+		page_view: 'page_viewed',
+		view_content: 'contents_viewed',
+		add_to_cart: 'items_added',
+		initiate_checkout: 'checkout_started',
+		purchase: 'order_created',
+		lead: 'lead_created',
+		complete_registration: 'registration_completed'
+	};
+
+	// OAIQ wants amounts as integers in MINOR currency units (4200 = 42.00).
+	// Currencies without a minor unit must not be multiplied (mirror of the
+	// dispatcher's toMinorUnits).
+	var OAIQ_ZERO_DECIMAL = { BIF: 1, CLP: 1, DJF: 1, GNF: 1, JPY: 1, KMF: 1, KRW: 1, PYG: 1, RWF: 1, UGX: 1, VND: 1, VUV: 1, XAF: 1, XOF: 1, XPF: 1 };
+	function oaiqAmount(value, currency) {
+		var factor = OAIQ_ZERO_DECIMAL[String(currency || '').toUpperCase()] ? 1 : 100;
+		return Math.round(value * factor);
+	}
+
+	function fireOaiq(name, eventId, data) {
+		if (!injected.oaiq || typeof window.oaiq !== 'function') {
+			return;
+		}
+		var oaiqName = OAIQ_MAP[name];
+		if (!oaiqName) {
+			return;
+		}
+		// Unlike GA4 (which proved it does NOT dedup gtag vs Measurement
+		// Protocol), OpenAI documents deduplication explicitly: pixel id +
+		// event name + event_id, first event wins. Server CAPI + this pixel
+		// share our eventId, so firing both is the intended setup.
+		var props = { type: 'customer_action' };
+		if (data) {
+			if (data.contentIds && data.contentIds.length) {
+				props.type = 'contents';
+				props.contents = data.contentIds.slice(0, 3).map(function (id) {
+					return { id: String(id) };
+				});
+			}
+			if (typeof data.value === 'number' && data.currency) {
+				props.amount = oaiqAmount(data.value, data.currency);
+				props.currency = String(data.currency).toUpperCase();
+			}
+		}
+		try {
+			window.oaiq('measure', oaiqName, props, { event_id: eventId });
+		} catch (e) {}
+	}
+
 	function fireClient(name, eventId, clientData) {
 		fireMeta(name, eventId, clientData);
 		fireGa4(name, eventId, clientData);
 		fireTikTok(name, eventId, clientData);
+		fireOaiq(name, eventId, clientData);
 	}
 
 	// ---- beacon to our server -----------------------------------------------
