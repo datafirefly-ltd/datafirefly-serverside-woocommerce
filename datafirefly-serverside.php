@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.15.0
+ * Version:           2.16.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.15.0');
+define('DFSS_VERSION', '2.16.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -465,8 +465,33 @@ class DFSS_Plugin
     {
         $ctx = array();
 
+        /* view_content on an ordinary CONTENT page — an article, a service
+           page, a case study.
+           
+           This block sits BEFORE the WooCommerce guard on purpose. It used to
+           sit after, so a site without WooCommerce got an empty context and the
+           tracker had nothing to report but page_view: an institutional site
+           running this plugin measured its audience and none of what that
+           audience actually read. dotsland.com ran a month that way.
+
+           Products are excluded here — a product page already reports
+           view_item just below, with its price, and reporting both would count
+           one page twice. */
+        if (is_singular() && !(function_exists('is_product') && is_product())) {
+            $dfss_post = get_queried_object();
+            if ($dfss_post instanceof WP_Post) {
+                $ctx['content'] = array(
+                    // The post TYPE is part of the id so an article and a page
+                    // that share a number stay two distinct lines.
+                    'id' => $dfss_post->post_type . '-' . (int) $dfss_post->ID,
+                    'name' => wp_strip_all_tags(get_the_title($dfss_post)),
+                    'category' => $dfss_post->post_type,
+                );
+            }
+        }
+
         if (!function_exists('is_product')) {
-            return $ctx; // WooCommerce not loaded
+            return $ctx; // WooCommerce not loaded: content context only
         }
 
         // view_item — product page. Resolve from the queried object (never via

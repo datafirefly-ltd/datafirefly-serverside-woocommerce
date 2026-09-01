@@ -715,6 +715,26 @@
 		track('page_view', {});
 	}
 
+	// view_content on an ordinary content page — article, service page, case
+	// study. Context provided by PHP in EVENTS.content, which is built even when
+	// WooCommerce is absent: an institutional site has content and leads, not a
+	// cart, and it used to report neither.
+	function trackContentView() {
+		var c = EVENTS.content;
+		if (!c || !c.id) {
+			return;
+		}
+		var item = { id: String(c.id), name: c.name, category: c.category, quantity: 1 };
+		track('view_content', {
+			clientData: {
+				contentIds: [item.id],
+				items: [{ item_id: item.id, item_name: item.name, item_category: item.category }],
+				contents: [{ content_id: item.id, content_name: item.name }]
+			},
+			beaconData: { products: [item] }
+		});
+	}
+
 	// view_item on a product page — context provided by PHP in EVENTS.viewItem.
 	function trackViewItem() {
 		var v = EVENTS.viewItem;
@@ -1285,6 +1305,24 @@
 		track(kind, { clientData: {}, beaconData: {} });
 	}
 
+	// Does this form look like a lead form rather than a search box, a login,
+	// a comment or a filter? An email field is the discriminator: nothing else
+	// on a page asks for one. Deliberately a heuristic and not a list of
+	// selectors — requiring the site owner to tag every form with
+	// [data-df-lead] means the events arrive only where somebody remembered,
+	// which on dotsland.com was one form in a month.
+	function looksLikeLeadForm(form) {
+		try {
+			if (form.matches('[data-df-lead]')) { return true; }
+			// Excluded by role: these have email fields too, and none is a lead.
+			if (form.matches('[role="search"], .search-form, .woocommerce-form-login, #commentform, [data-df-no-lead]')) { return false; }
+			if (form.method && String(form.method).toLowerCase() === 'get') { return false; }
+			return !!form.querySelector('input[type="email"], input[name*="email" i]');
+		} catch (err) {
+			return false;
+		}
+	}
+
 	function wireLeadForms() {
 		document.addEventListener('submit', function (e) {
 			var form = e.target;
@@ -1294,11 +1332,26 @@
 					fireLead('complete_registration');
 					return;
 				}
-				if (form.matches('[data-df-lead]')) {
+				// A form handled by one of the plugins below reports its own
+				// SUCCESS a moment later; firing here as well would count the
+				// same lead twice, and would also count the failures.
+				if (form.matches('.wpcf7-form, .wpforms-form, .gform_wrapper form, .elementor-form, .nf-form-cont form')) { return; }
+				if (looksLikeLeadForm(form)) {
 					fireLead('lead');
 				}
 			} catch (err) {}
 		}, true);
+
+		// The form plugins that KNOW whether the message got through. Success is
+		// the honest moment to report a lead: a form that failed validation, or
+		// whose mail bounced at the server, did not produce a prospect.
+		document.addEventListener('wpcf7mailsent', function () { fireLead('lead'); }, false); // Contact Form 7
+		if (window.jQuery) {
+			window.jQuery(document).on('wpformsAjaxSubmitSuccess', function () { fireLead('lead'); });
+			window.jQuery(document).on('gform_confirmation_loaded', function () { fireLead('lead'); });
+			window.jQuery(document).on('submit_success', function () { fireLead('lead'); });       // Elementor
+			window.jQuery(document).on('nfFormSubmitResponse', function () { fireLead('lead'); }); // Ninja Forms
+		}
 	}
 
 	// ---- boot ---------------------------------------------------------------
@@ -1310,6 +1363,7 @@
 
 		// Auto events for the current page (each is internally consent-gated).
 		trackPageView();
+		trackContentView();
 		trackViewItem();
 		trackInitiateCheckout();
 		trackPurchase();
