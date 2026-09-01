@@ -848,6 +848,58 @@
 	//   - AJAX add-to-cart (archive/shop loop) fires this jQuery event;
 	//   - single-product form submit (no AJAX) we catch on submit.
 	function wireAddToCart() {
+		// ---- WooCommerce Blocks -------------------------------------------
+		// Block themes add to the cart through the Store API and nothing else:
+		// no jQuery event, no form submit, no link. All three handlers below
+		// are blind to them, so a shop on a modern theme reported browsing and
+		// purchases with an empty middle.
+		//
+		// We observe the documented Store API call rather than listen for a
+		// block event, deliberately. The events blocks emit vary by version and
+		// several do not carry the product at all; the REST contract does, and
+		// it is stable: POST .../wc/store/v1/cart/add-item with {id, quantity}.
+		// Watching the request means we read the same id the shop just used.
+		//
+		// The wrapper is observe-only and paranoid: it always calls through,
+		// never inspects the response body, never throws, and reads only its
+		// own copy of the request. Tracking sits on the storefront and on the
+		// checkout — it may cost an event, never a sale.
+		try {
+			if (typeof window.fetch === 'function' && !window.__dfssFetchWrapped) {
+				window.__dfssFetchWrapped = true;
+				var nativeFetch = window.fetch;
+				window.fetch = function (input, init) {
+					var out = nativeFetch.apply(this, arguments);
+					try {
+						var url = typeof input === 'string' ? input : (input && input.url) || '';
+						var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+						if (
+							method === 'POST' &&
+							url.indexOf('/wc/store/') !== -1 &&
+							url.indexOf('/cart/add-item') !== -1
+						) {
+							var body = init && typeof init.body === 'string' ? init.body : '';
+							var payload = null;
+							try { payload = JSON.parse(body); } catch (e) {}
+							if (payload && payload.id) {
+								// Only once the server accepted it: a rejected
+								// add (out of stock, invalid variation) is not
+								// an add to cart.
+								out.then(function (res) {
+									try {
+										if (res && res.ok) {
+											fireAddToCart(String(payload.id), parseInt(payload.quantity, 10) || 1);
+										}
+									} catch (e) {}
+								}, function () {});
+							}
+						}
+					} catch (e) {}
+					return out;
+				};
+			}
+		} catch (e) {}
+
 		// jQuery AJAX add-to-cart (WooCommerce core). Guard for jQuery presence.
 		if (window.jQuery) {
 			window.jQuery(document.body).on('added_to_cart', function (evt, fragments, cart_hash, $button) {
