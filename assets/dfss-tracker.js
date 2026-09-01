@@ -476,7 +476,16 @@
 		purchase: 'Purchase',
 		lead: 'Lead',
 		complete_registration: 'CompleteRegistration',
-		search: 'Search'
+		search: 'Search',
+		subscribe: 'Subscribe',
+		schedule: 'Schedule',
+		contact: 'Contact',
+		start_trial: 'StartTrial',
+		submit_application: 'SubmitApplication',
+		donate: 'Donate',
+		find_location: 'FindLocation',
+		customize_product: 'CustomizeProduct',
+		add_to_wishlist: 'AddToWishlist'
 	};
 	var TT_MAP = {
 		page_view: 'Pageview',
@@ -487,7 +496,10 @@
 		purchase: 'CompletePayment',
 		lead: 'SubmitForm',
 		complete_registration: 'CompleteRegistration',
-		search: 'Search'
+		search: 'Search',
+		subscribe: 'Subscribe',
+		add_to_wishlist: 'AddToWishlist',
+		contact: 'Contact'
 	};
 	var GA4_MAP = {
 		page_view: 'page_view',
@@ -498,7 +510,23 @@
 		purchase: 'purchase',
 		lead: 'generate_lead',
 		complete_registration: 'sign_up',
-		search: 'search'
+		search: 'search',
+		view_item_list: 'view_item_list',
+		select_item: 'select_item',
+		view_cart: 'view_cart',
+		remove_from_cart: 'remove_from_cart',
+		add_shipping_info: 'add_shipping_info',
+		add_to_wishlist: 'add_to_wishlist',
+		subscribe: 'subscribe',
+		schedule: 'schedule',
+		contact: 'contact',
+		share: 'share',
+		start_trial: 'start_trial',
+		submit_application: 'submit_application',
+		donate: 'donate',
+		find_location: 'find_location',
+		customize_product: 'customize_product',
+		login: 'login'
 	};
 
 	function fireMeta(name, eventId, data) {
@@ -649,9 +677,17 @@
 		// (with the header) is preferred when the page is staying.
 		// Events triggered by a click/submit that may navigate away — flush via
 		// sendBeacon so they survive the unload.
+		// Events that fire as the page is LEAVING. A plain fetch is cancelled
+		// with the document, so these have to go out on sendBeacon or they are
+		// simply lost — which is how a mailto click, a share and a booking link
+		// can all look like nothing ever happened.
 		var navigating = (name === 'purchase' || name === 'select_item' ||
 			name === 'select_promotion' || name === 'lead' ||
-			name === 'complete_registration');
+			name === 'complete_registration' || name === 'contact' ||
+			name === 'schedule' || name === 'share' || name === 'start_trial' ||
+			name === 'subscribe' || name === 'submit_application' ||
+			name === 'donate' || name === 'find_location' ||
+			name === 'add_shipping_info' || name === 'add_to_wishlist');
 		var usedBeacon = false;
 		if (navigator.sendBeacon && (navigating || document.visibilityState === 'hidden')) {
 			try {
@@ -1354,6 +1390,264 @@
 		}
 	}
 
+
+	// ---- lead-gen and engagement: the events an institutional site has ------
+	//
+	// A site that sells nothing still converts: it is contacted, subscribed to,
+	// booked, shared and applied to. None of that used to leave a trace, so the
+	// console showed a shop-shaped funnel of zeros next to an inbox that was
+	// filling up. Each wiring below is generic on purpose — it must work on a
+	// theme nobody here has ever seen — with a [data-df-*] attribute as the
+	// explicit override when a site wants to be exact.
+
+	function firstMatch(el, selector) {
+		return el && el.closest ? el.closest(selector) : null;
+	}
+
+	// contact — a click on an address or a phone number. On an institutional
+	// site this is frequently the ONLY conversion: no form, just the mailto in
+	// the footer.
+	function wireContactLinks() {
+		document.addEventListener('click', function (e) {
+			var a = firstMatch(e.target, 'a[href^="mailto:"], a[href^="tel:"], [data-df-contact]');
+			if (!a) { return; }
+			var href = String(a.getAttribute('href') || '');
+			// The address itself is NOT sent: it is the shop's own, it would be
+			// personal data on the page, and knowing WHICH mailbox was clicked
+			// adds nothing to knowing that someone reached out.
+			track('contact', {
+				clientData: {},
+				beaconData: { method: href.indexOf('tel:') === 0 ? 'phone' : 'email' }
+			});
+		}, true);
+	}
+
+	// schedule — a booking link. Calendly and its equivalents open in a new tab
+	// or an overlay, so nothing else on our side would ever see it.
+	function wireScheduleLinks() {
+		var hosts = 'calendly.com|cal.com|savvycal.com|meetings.hubspot.com|app.acuityscheduling.com|zcal.co|tidycal.com|youcanbook.me';
+		var re = new RegExp('(' + hosts + ')', 'i');
+		document.addEventListener('click', function (e) {
+			var a = firstMatch(e.target, 'a[href], [data-df-schedule]');
+			if (!a) { return; }
+			if (!a.matches('[data-df-schedule]') && !re.test(String(a.getAttribute('href') || ''))) { return; }
+			track('schedule', { clientData: {}, beaconData: {} });
+		}, true);
+	}
+
+	// share — a click on a social share link. Standard sharer URLs, because
+	// every share button in existence ends up pointing at one of them.
+	function wireShareLinks() {
+		var re = /(facebook\.com\/sharer|twitter\.com\/intent|x\.com\/intent|linkedin\.com\/shar|pinterest\.[a-z.]+\/pin\/create|api\.whatsapp\.com\/send|t\.me\/share|reddit\.com\/submit)/i;
+		document.addEventListener('click', function (e) {
+			var a = firstMatch(e.target, 'a[href], [data-df-share]');
+			if (!a) { return; }
+			var href = String(a.getAttribute('href') || '');
+			if (!a.matches('[data-df-share]') && !re.test(href)) { return; }
+			var network = (href.match(/(facebook|twitter|x|linkedin|pinterest|whatsapp|telegram|reddit)/i) || [])[1];
+			track('share', {
+				clientData: {},
+				beaconData: network ? { method: String(network).toLowerCase() } : {}
+			});
+		}, true);
+	}
+
+	// start_trial — the free-plan / trial CTA, in the languages this product is
+	// actually sold in rather than English only.
+	function wireTrialLinks() {
+		var re = /(free-?trial|start-?free|\/trial|essai-?gratuit|\/gratuit|kostenlos|\/gratis|prova-?gratuita|signup-?free|zdarma|bezplatn)/i;
+		document.addEventListener('click', function (e) {
+			var a = firstMatch(e.target, 'a[href], [data-df-trial]');
+			if (!a) { return; }
+			if (!a.matches('[data-df-trial]') && !re.test(String(a.getAttribute('href') || ''))) { return; }
+			track('start_trial', { clientData: {}, beaconData: {} });
+		}, true);
+		document.addEventListener('submit', function (e) {
+			var f = e.target;
+			if (!f || f.nodeName !== 'FORM') { return; }
+			try {
+				if (f.matches('[data-df-trial]') || re.test(String(f.getAttribute('action') || ''))) {
+					track('start_trial', { clientData: {}, beaconData: {} });
+				}
+			} catch (err) {}
+		}, true);
+	}
+
+	// subscribe — a newsletter form. The named ones are the four plugins that
+	// cover most WordPress sites; the fallback is the shape of the thing: an
+	// email field and nothing else to fill in, which is a newsletter box and
+	// not a contact form.
+	var NEWSLETTER_SEL = '.mc4wp-form, .sib-form, form.tnp-form, .mailpoet_form, [data-df-subscribe]';
+	function looksLikeNewsletter(form) {
+		try {
+			if (form.matches(NEWSLETTER_SEL)) { return true; }
+			if (!form.querySelector('input[type="email"], input[name*="email" i]')) { return false; }
+			var filled = form.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]), textarea, select');
+			return filled.length === 1; // just the address
+		} catch (err) {
+			return false;
+		}
+	}
+	var subscribeFired = false;
+	function fireSubscribe() {
+		if (subscribeFired) { return; }
+		subscribeFired = true;
+		track('subscribe', { clientData: {}, beaconData: {} });
+	}
+	function wireNewsletterForms() {
+		document.addEventListener('submit', function (e) {
+			var f = e.target;
+			if (f && f.nodeName === 'FORM' && looksLikeNewsletter(f)) { fireSubscribe(); }
+		}, true);
+		// Mailchimp for WordPress reports its own success, which is the honest
+		// moment: a rejected address never subscribed to anything.
+		if (window.jQuery) {
+			window.jQuery(document).on('mc4wp-subscribed', function () { fireSubscribe(); });
+		}
+	}
+
+	// submit_application — a job or partner application: a form asking for a
+	// file AND an address. A file upload alone is an avatar or a support
+	// attachment, which is why both are required.
+	function wireApplicationForms() {
+		document.addEventListener('submit', function (e) {
+			var f = e.target;
+			if (!f || f.nodeName !== 'FORM') { return; }
+			try {
+				var explicit = f.matches('[data-df-application]');
+				if (!explicit && !(f.querySelector('input[type="file"]') && f.querySelector('input[type="email"], input[name*="email" i]'))) { return; }
+				track('submit_application', { clientData: {}, beaconData: {} });
+			} catch (err) {}
+		}, true);
+	}
+
+	// donate / find_location — no reliable generic shape exists for either, so
+	// these are opt-in by attribute rather than guessed at. A charity tags its
+	// donate button once; guessing would have produced a "donation" every time
+	// somebody clicked a button whose label happened to match.
+	function wireTaggedConversions() {
+		[['[data-df-donate]', 'donate'], ['[data-df-find-location]', 'find_location']].forEach(function (pair) {
+			document.addEventListener('click', function (e) {
+				if (firstMatch(e.target, pair[0])) {
+					track(pair[1], { clientData: {}, beaconData: {} });
+				}
+			}, true);
+		});
+		document.addEventListener('submit', function (e) {
+			var f = e.target;
+			if (!f || f.nodeName !== 'FORM') { return; }
+			try {
+				if (f.matches('[data-df-donate]')) { track('donate', { clientData: {}, beaconData: {} }); }
+				else if (f.matches('[data-df-find-location]')) { track('find_location', { clientData: {}, beaconData: {} }); }
+			} catch (err) {}
+		}, true);
+	}
+
+	// search — the results page, with the term WordPress resolved rather than
+	// whatever the address bar happens to hold.
+	function trackSearch() {
+		var q = EVENTS.search;
+		if (!q || !q.searchString) { return; }
+		track('search', {
+			clientData: { searchString: q.searchString },
+			beaconData: { searchString: q.searchString }
+		});
+	}
+
+	// view_item_list — a listing page on a site with no shop: the blog index,
+	// a category, a search result page.
+	function trackContentList() {
+		var l = EVENTS.contentList;
+		if (!l || !l.products || !l.products.length) { return; }
+		var products = l.products.map(function (p) {
+			return { id: String(p.id), name: p.name, category: p.category };
+		});
+		track('view_item_list', {
+			clientData: {
+				items: products.map(function (p) { return { item_id: p.id, item_name: p.name, item_category: p.category }; })
+			},
+			beaconData: { listId: l.listId, listName: l.listName, products: products }
+		});
+	}
+
+	// select_item — which entry of that listing was actually opened.
+	function wireContentListClicks() {
+		var l = EVENTS.contentList;
+		if (!l || !l.products || !l.products.length) { return; }
+		document.addEventListener('click', function (e) {
+			var a = firstMatch(e.target, 'a[href]');
+			if (!a) { return; }
+			// Match the link to a listed entry by its title: the markup around
+			// a card differs in every theme, the title does not.
+			var text = (a.textContent || '').trim().toLowerCase();
+			if (!text) { return; }
+			for (var i = 0; i < l.products.length; i++) {
+				var p = l.products[i];
+				if (p.name && text.indexOf(String(p.name).trim().toLowerCase()) === 0) {
+					track('select_item', {
+						clientData: { items: [{ item_id: String(p.id), item_name: p.name }] },
+						beaconData: { listId: l.listId, listName: l.listName, products: [{ id: String(p.id), name: p.name }] }
+					});
+					return;
+				}
+			}
+		}, true);
+	}
+
+	// view_cart — the cart page. add_to_cart and initiate_checkout cannot tell
+	// apart a visitor who assembled a basket and stopped from one who never
+	// reached it; this can.
+	function trackViewCart() {
+		var c = EVENTS.cart;
+		if (!c || !c.products) { return; }
+		var products = c.products.map(function (p) {
+			return { id: String(p.id), name: p.name, price: num(p.price), quantity: num(p.quantity) };
+		});
+		track('view_cart', {
+			clientData: {
+				value: num(c.value), currency: c.currency,
+				items: products.map(function (p) { return { item_id: p.id, item_name: p.name, price: p.price, quantity: p.quantity }; })
+			},
+			beaconData: { currency: c.currency, value: num(c.value), numItems: num(c.numItems), products: products }
+		});
+	}
+
+	// remove_from_cart / customize_product / add_shipping_info / add_to_wishlist
+	// — the WooCommerce signals the connector did not listen for.
+	function wireCartAndCheckoutExtras() {
+		if (window.jQuery) {
+			// Woo fires this on the cart page when a line is removed.
+			window.jQuery(document.body).on('removed_from_cart', function () {
+				track('remove_from_cart', { clientData: {}, beaconData: {} });
+			});
+			// A variation chosen on a product page: the visitor configured it.
+			window.jQuery(document.body).on('found_variation', function (ev, variation) {
+				var id = variation && (variation.variation_id || variation.id);
+				track('customize_product', {
+					clientData: id ? { contentIds: [String(id)] } : {},
+					beaconData: id ? { products: [{ id: String(id), quantity: 1 }] } : {}
+				});
+			});
+		}
+		// Shipping method chosen at checkout — the step between the cart and
+		// the payment, and the one where a shipping price loses the sale.
+		var shippingSent = false;
+		document.addEventListener('change', function (e) {
+			var t = e.target;
+			if (!t || !t.name) { return; }
+			if (String(t.name).indexOf('shipping_method') !== 0) { return; }
+			if (shippingSent) { return; }
+			shippingSent = true;
+			track('add_shipping_info', { clientData: {}, beaconData: {} });
+		}, true);
+		// The wishlist plugins that cover most Woo shops, plus the attribute.
+		document.addEventListener('click', function (e) {
+			var a = firstMatch(e.target, '.add_to_wishlist, .yith-wcwl-add-button a, .tinvwl_add_to_wishlist_button, [data-df-wishlist]');
+			if (!a) { return; }
+			track('add_to_wishlist', { clientData: {}, beaconData: {} });
+		}, true);
+	}
+
 	// ---- boot ---------------------------------------------------------------
 
 	function boot() {
@@ -1364,6 +1658,9 @@
 		// Auto events for the current page (each is internally consent-gated).
 		trackPageView();
 		trackContentView();
+		trackContentList();
+		trackSearch();
+		trackViewCart();
 		trackViewItem();
 		trackInitiateCheckout();
 		trackPurchase();
@@ -1377,6 +1674,15 @@
 		wireWooProductGrid();
 		wirePromotions();
 		wireLeadForms();
+		wireContentListClicks();
+		wireContactLinks();
+		wireScheduleLinks();
+		wireShareLinks();
+		wireTrialLinks();
+		wireNewsletterForms();
+		wireApplicationForms();
+		wireTaggedConversions();
+		wireCartAndCheckoutExtras();
 	}
 
 	if (document.readyState === 'loading') {

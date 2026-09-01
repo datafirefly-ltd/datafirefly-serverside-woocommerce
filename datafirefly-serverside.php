@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.16.0
+ * Version:           2.17.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.16.0');
+define('DFSS_VERSION', '2.17.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -65,6 +65,12 @@ class DFSS_Plugin
         // full refund, and passes the refund id — which is what makes each one
         // a distinct, deduplicable event.
         add_action('woocommerce_order_refunded', array($this, 'on_refund'), 10, 2);
+
+        // login — server-side, because it is the one conversion the browser
+        // cannot witness honestly: WordPress redirects away from the form, so a
+        // click handler fires before anyone knows whether the password was
+        // right. This hook only runs once it WAS.
+        add_action('wp_login', array($this, 'on_login'), 10, 2);
 
         // --- client tracking layer (new in v2.0, additive + gated) ---
         add_action('wp_enqueue_scripts', array($this, 'enqueue_tracker'));
@@ -377,6 +383,47 @@ class DFSS_Plugin
      * Keyed on the REFUND id, not the order: two partial refunds on one order
      * are two real events, and replaying the same one must deduplicate.
      */
+    /**
+     * A visitor who signed in. Fired from wp_login, so a failed attempt never
+     * reaches it — the browser could not tell the two apart.
+     *
+     * Carries no personal data beyond what the connector already hashes for
+     * matching: the user id, not the address.
+     *
+     * @param string  $user_login
+     * @param WP_User $user
+     */
+    public function on_login($user_login, $user = null)
+    {
+        try {
+            $opts = $this->opts();
+            if (empty($opts['enabled'])) {
+                return;
+            }
+            $payload = array(
+                'eventId' => 'login_' . ($user instanceof WP_User ? (int) $user->ID : 0) . '_' . time(),
+                'eventName' => 'login',
+                'eventTime' => time(),
+                'sourceUrl' => home_url('/'),
+                'actionSource' => 'website',
+                'consent' => 'not_required',
+                'userData' => array(),
+            );
+            if ($user instanceof WP_User) {
+                $payload['userData']['externalId'] = (string) $user->ID;
+                if (is_email($user->user_email)) {
+                    $payload['userData']['email'] = $user->user_email;
+                }
+            }
+
+            $client = new DFSS_Client($opts['tenant_id'], $opts['hmac_secret'], $opts['endpoint']);
+            $result = $client->send($payload);
+            DFSS_Queue::record_attempt($payload, $result, 'server');
+        } catch (Exception $e) {
+            // A sign-in must never fail because our measurement did.
+        }
+    }
+
     public function on_refund($order_id, $refund_id)
     {
         try {
@@ -490,8 +537,106 @@ class DFSS_Plugin
             }
         }
 
+        // search — the results page. The term comes from WordPress rather than
+        // from the query string the browser happens to hold, and the dispatcher
+        // caps it at 200 characters and redacts it when it is somebody's email
+        // or phone number: a search box is free text and people paste their own
+        // order confirmation into it.
+        if (is_search()) {
+            $dfss_q = trim((string) get_search_query());
+            if ('' !== $dfss_q) {
+                $ctx['search'] = array(
+                    'searchString' => function_exists('mb_substr')
+                        ? mb_substr($dfss_q, 0, 200)
+                        : substr($dfss_q, 0, 200),
+                );
+            }
+        }
+
+        // view_item_list — a listing page: the blog index, a category archive,
+        // an author or date archive. The e-commerce equivalent is handled by
+        // the Woo block below; this is the one an institutional site has.
+        if ((is_home() || is_archive() || is_search()) && !(function_exists('is_shop') && is_shop())) {
+            $dfss_items = array();
+            if (have_posts()) {
+                global $wp_query;
+                $dfss_posts = isset($wp_query->posts) && is_array($wp_query->posts) ? $wp_query->posts : array();
+                foreach (array_slice($dfss_posts, 0, 20) as $dfss_p) {
+                    if (!$dfss_p instanceof WP_Post) {
+                        continue;
+                    }
+                    $dfss_items[] = array(
+                        'id' => $dfss_p->post_type . '-' . (int) $dfss_p->ID,
+                        'name' => wp_strip_all_tags(get_the_title($dfss_p)),
+                        'category' => $dfss_p->post_type,
+                    );
+                }
+            }
+            // Name the list from what WordPress is actually showing, so the
+            // GA4 report reads "Categorie : Data & Analytics" rather than a
+            // slug nobody recognises three months later.
+            $dfss_list_id = 'archive';
+            $dfss_list_name = 'Archive';
+            if (is_search()) {
+                $dfss_list_id = 'search';
+                $dfss_list_name = 'Search results';
+            } elseif (is_home()) {
+                $dfss_list_id = 'blog';
+                $dfss_list_name = 'Blog';
+            } elseif (is_category() || is_tag() || is_tax()) {
+                $dfss_term = get_queried_object();
+                if ($dfss_term instanceof WP_Term) {
+                    $dfss_list_id = $dfss_term->taxonomy . '-' . $dfss_term->slug;
+                    $dfss_list_name = wp_strip_all_tags($dfss_term->name);
+                }
+            } elseif (is_post_type_archive()) {
+                $dfss_list_id = 'post-type-' . (string) get_query_var('post_type');
+                $dfss_list_name = (string) post_type_archive_title('', false);
+            }
+
+            if (!empty($dfss_items)) {
+                $ctx['contentList'] = array(
+                    'listId' => $dfss_list_id,
+                    'listName' => $dfss_list_name,
+                    'products' => $dfss_items,
+                );
+            }
+        }
+
         if (!function_exists('is_product')) {
             return $ctx; // WooCommerce not loaded: content context only
+        }
+
+        // view_cart — the cart page, which is a funnel step in its own right:
+        // it is where a shop finds out how many people assemble a basket and
+        // then stop, which add_to_cart and initiate_checkout cannot tell apart.
+        if (function_exists('is_cart') && is_cart()) {
+            $dfss_cart = function_exists('WC') ? WC()->cart : null;
+            if ($dfss_cart && !$dfss_cart->is_empty()) {
+                $dfss_cart_items = array();
+                $dfss_cart_n = 0;
+                foreach ($dfss_cart->get_cart() as $dfss_item) {
+                    if (empty($dfss_item['data']) || !$dfss_item['data'] instanceof WC_Product) {
+                        continue;
+                    }
+                    $dfss_qty = (int) $dfss_item['quantity'];
+                    $dfss_cart_n += $dfss_qty;
+                    $dfss_cart_items[] = array(
+                        'id' => (string) $dfss_item['data']->get_id(),
+                        'name' => $dfss_item['data']->get_name(),
+                        'price' => round((float) wc_get_price_to_display($dfss_item['data']), 2),
+                        'quantity' => $dfss_qty,
+                    );
+                }
+                if (!empty($dfss_cart_items)) {
+                    $ctx['cart'] = array(
+                        'value' => round((float) $dfss_cart->get_total('edit'), 2),
+                        'currency' => get_woocommerce_currency(),
+                        'numItems' => $dfss_cart_n,
+                        'products' => $dfss_cart_items,
+                    );
+                }
+            }
         }
 
         // view_item — product page. Resolve from the queried object (never via
