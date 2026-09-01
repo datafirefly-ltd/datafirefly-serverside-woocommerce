@@ -905,11 +905,13 @@
 			window.jQuery(document.body).on('added_to_cart', function (evt, fragments, cart_hash, $button) {
 				var id = '';
 				var qty = 1;
+				var cardName = '';
 				if ($button && $button.length) {
 					id = $button.attr('data-product_id') || idFromAddToCartHref($button.attr('href')) || '';
 					qty = parseInt($button.attr('data-quantity') || '1', 10) || 1;
+					cardName = nameFromCard($button[0]);
 				}
-				fireAddToCart(id, qty);
+				fireAddToCart(id, qty, cardName);
 			});
 		}
 		// Plain `?add-to-cart=` links — the shop loop of many themes, and the
@@ -928,7 +930,7 @@
 			}
 			var id = idFromAddToCartHref(link.getAttribute('href'));
 			if (id) {
-				fireAddToCart(id, parseInt(link.getAttribute('data-quantity') || '1', 10) || 1);
+				fireAddToCart(id, parseInt(link.getAttribute('data-quantity') || '1', 10) || 1, nameFromCard(link));
 			}
 		}, true);
 
@@ -956,6 +958,40 @@
 		});
 	}
 
+	// The product NAME out of the card the button sits in.
+	//
+	// Added because a product added from a LISTING arrived with an id and
+	// nothing else, so the console showed a row headed "8005" — a number the
+	// merchant has no way to recognise. The page has no product context there
+	// (that only exists on a product page), so the name has to come from the
+	// card itself.
+	//
+	// Theme-independent on purpose: this shop's theme uses none of
+	// WooCommerce's standard loop markup, no `li.product`, no
+	// `.woocommerce-loop-product__title`, not even an aria-label. What every
+	// card DOES have is a link to the product page with the product name as
+	// its text. So: walk up a few levels, take the longest link text that is
+	// not the add-to-cart button itself. Wrong guesses cost a name, never an
+	// event — an empty result simply sends no name, exactly as before.
+	function nameFromCard(el) {
+		try {
+			var node = el;
+			for (var up = 0; up < 5 && node; up++) {
+				node = node.parentElement;
+				if (!node) { break; }
+				var links = node.querySelectorAll('a[href*="/product/"], a[href*="/produit/"]');
+				var best = '';
+				for (var i = 0; i < links.length; i++) {
+					var txt = (links[i].textContent || '').trim();
+					// Skip the button itself and image-only links.
+					if (txt.length > best.length && links[i] !== el) { best = txt; }
+				}
+				if (best.length > 2) { return best.slice(0, 200); }
+			}
+		} catch (e) {}
+		return '';
+	}
+
 	// The product id out of a WooCommerce add-to-cart URL, e.g.
 	// /cart/?add-to-cart=8001 or /?add-to-cart=8001&quantity=2.
 	function idFromAddToCartHref(href) {
@@ -970,7 +1006,7 @@
 	// both the AJAX `added_to_cart` event AND submit the form): ignore a repeat
 	// for the same product id within a short window.
 	var lastAddToCart = {};
-	function fireAddToCart(id, qty) {
+	function fireAddToCart(id, qty, cardName) {
 		id = id ? String(id) : '';
 		qty = qty || 1;
 
@@ -1014,9 +1050,14 @@
 		if (id && v && v.id && String(v.id) === id) {
 			name = v.name;
 			price = num(v.value);
-			if (name) { line.name = name; }
-			if (price !== undefined) { line.price = price; }
+		} else if (cardName) {
+			// From a listing: the card gives the name, never a price — the
+			// displayed price may be a range, a "from" price or struck
+			// through, and a wrong amount is worse than none.
+			name = cardName;
 		}
+		if (name) { line.name = name; }
+		if (price !== undefined) { line.price = price; }
 
 		track('add_to_cart', {
 			clientData: {

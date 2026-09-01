@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.12.0
+ * Version:           2.14.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.12.0');
+define('DFSS_VERSION', '2.14.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -555,6 +555,13 @@ class DFSS_Plugin
                     'eventId' => 'order_' . $order->get_id(),
                     'orderId' => (string) $order->get_order_number(),
                     'value' => round((float) $order->get_total(), 2),
+                    // The same order NET of tax. `value` stays what the
+                    // customer was charged, because that is what the ad
+                    // platforms optimise on; this is what the merchant reads
+                    // in their own books, and in B2B it is the only figure
+                    // that means anything. Sent rather than derived: a total
+                    // says nothing about how much of it was tax.
+                    'valueNet' => round((float) $order->get_total() - (float) $order->get_total_tax(), 2),
                     'currency' => $order->get_currency(),
                     'numItems' => $num_items,
                     'products' => $products,

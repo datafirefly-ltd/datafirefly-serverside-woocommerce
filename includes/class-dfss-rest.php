@@ -319,6 +319,13 @@ class DFSS_REST
         if (isset($in['value']) && is_numeric($in['value'])) {
             $out['value'] = (float) $in['value'];
         }
+        // Net of tax. The purchase goes server-side and never through this
+        // beacon, but the allow-list is the contract for every event: a field
+        // missing here is dropped in silence, which is how a value that IS
+        // being sent still never arrives.
+        if (isset($in['valueNet']) && is_numeric($in['valueNet'])) {
+            $out['valueNet'] = (float) $in['valueNet'];
+        }
         if (!empty($in['orderId']) && is_scalar($in['orderId'])) {
             $out['orderId'] = sanitize_text_field(wp_unslash((string) $in['orderId']));
         }
