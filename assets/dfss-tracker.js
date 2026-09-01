@@ -866,13 +866,21 @@
 			if (!form || !form.classList || !form.classList.contains('cart')) {
 				return;
 			}
-			var input = form.querySelector('[name="add-to-cart"], [name="product_id"]');
 			var qtyEl = form.querySelector('[name="quantity"]');
-			var id = input ? (input.value || input.getAttribute('value') || '') : '';
 			var qty = qtyEl ? (parseInt(qtyEl.value, 10) || 1) : 1;
-			if (id) {
-				fireAddToCart(id, qty);
-			}
+			// Four places, because no single one is reliable across themes.
+			// The variation input wins when present: on a variable product
+			// `add-to-cart` holds the PARENT id and `variation_id` the one that
+			// was actually bought.
+			var el = form.querySelector('[name="variation_id"]')
+				|| form.querySelector('[name="add-to-cart"]')
+				|| form.querySelector('[name="product_id"]')
+				|| form.querySelector('button[name="add-to-cart"][value]');
+			var id = el ? (el.value || el.getAttribute('value') || '') : '';
+			// The submit itself is proof of an add-to-cart; the id is not always
+			// in the form. Firing with none is still better than losing the
+			// step, and fireAddToCart falls back to the page's own product.
+			fireAddToCart(id, qty);
 		});
 	}
 
@@ -883,20 +891,59 @@
 	function fireAddToCart(id, qty) {
 		id = id ? String(id) : '';
 		qty = qty || 1;
+
+		// ---- the product this is about -----------------------------------
+		// Measured on datafirefly.com before this was written: 35 add-to-cart
+		// events over 28 days, NONE of which said which product. On the same
+		// day, with the same plugin, view_content carried its product line 25
+		// times out of 34 and purchase once out of two — so it was never a
+		// question of an outdated module. The id came from the button's
+		// `data-product_id`, which the AJAX loop provides and a single-product
+		// page does not, and the event was sent anyway with an empty list.
+		//
+		// The merchant then read "0" in the Added-to-cart column and
+		// understood "nobody put it in their basket", when it meant "no
+		// add-to-cart told us which product". Two different statements.
+		//
+		// The page's own product context is the fallback, and it is the
+		// reliable one: PHP injects it for view_content, so on a product page
+		// we always know what was added even when the button says nothing.
+		var v = EVENTS.viewItem;
+		if (!id && v && v.id) {
+			id = String(v.id);
+		}
+
 		var now = Date.now();
 		var dedupKey = id || '_';
 		if (lastAddToCart[dedupKey] && now - lastAddToCart[dedupKey] < 1500) {
 			return;
 		}
 		lastAddToCart[dedupKey] = now;
+
+		// Name and price when the page is about THIS product — the same three
+		// fields view_content sends. Without them the console can only show an
+		// id, so a merchant reads a row of numbers instead of a product. Only
+		// filled when the ids match: a loop add-to-cart is about a different
+		// product from the one the page describes, and copying the page's name
+		// onto it would label the row with the wrong article.
+		var line = { id: id, quantity: qty };
+		var name;
+		var price;
+		if (id && v && v.id && String(v.id) === id) {
+			name = v.name;
+			price = num(v.value);
+			if (name) { line.name = name; }
+			if (price !== undefined) { line.price = price; }
+		}
+
 		track('add_to_cart', {
 			clientData: {
 				contentIds: id ? [id] : [],
-				items: id ? [{ item_id: id, quantity: qty }] : [],
-				contents: id ? [{ content_id: id, quantity: qty }] : []
+				items: id ? [{ item_id: id, item_name: name, price: price, quantity: qty }] : [],
+				contents: id ? [{ content_id: id, content_name: name, price: price, quantity: qty }] : []
 			},
 			beaconData: {
-				products: id ? [{ id: id, quantity: qty }] : []
+				products: id ? [line] : []
 			}
 		});
 	}
