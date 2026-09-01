@@ -366,6 +366,26 @@ class DFSS_REST
 
         // Merchandising context (view_item_list / select_item / view_promotion /
         // select_promotion). Short opaque labels — capped and text-sanitized.
+        // Free-text context that is NOT a label: what the visitor searched for,
+        // and how they got in touch. Capped, and the dispatcher redacts a term
+        // that turns out to be an email address or a phone number.
+        //
+        // This allow-list is the contract for every event on this route: a
+        // field missing here is dropped in SILENCE. The search term was sent
+        // by the tracker and stored nowhere for exactly that reason.
+        if (!empty($in['searchString']) && is_scalar($in['searchString'])) {
+            $term = sanitize_text_field(wp_unslash((string) $in['searchString']));
+            if ($term !== '') {
+                $out['searchString'] = mb_substr($term, 0, 200);
+            }
+        }
+        if (!empty($in['method']) && is_scalar($in['method'])) {
+            $method = sanitize_text_field(wp_unslash((string) $in['method']));
+            if ($method !== '') {
+                $out['method'] = mb_substr($method, 0, 40);
+            }
+        }
+
         foreach (array('listId', 'listName', 'promotionId', 'promotionName', 'creativeName', 'creativeSlot') as $mk) {
             if (!empty($in[$mk]) && is_scalar($in[$mk])) {
                 $val = sanitize_text_field(wp_unslash((string) $in[$mk]));
