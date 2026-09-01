@@ -246,6 +246,18 @@ class DFSS_Event_Builder
             $d['numItems'] = (int) $in['numItems'];
         }
 
+        // The visitor's own words, and how they got in touch. Capped here as
+        // well as at the route: this file is the SECOND allow-list on the same
+        // payload — the route sanitizes, this builds what actually leaves —
+        // and a field added to one and not the other is dropped in silence.
+        // That is precisely what happened to searchString: added at the route,
+        // missing here, and the term arrived empty in production.
+        foreach (array('searchString' => 200, 'method' => 40) as $fk => $max) {
+            if (!empty($in[$fk]) && is_string($in[$fk])) {
+                $d[$fk] = mb_substr($in[$fk], 0, $max);
+            }
+        }
+
         // Merchandising context (view_item_list / select_item / view_promotion /
         // select_promotion). GA4-native list & promotion reporting; other
         // destinations ignore these keys.
