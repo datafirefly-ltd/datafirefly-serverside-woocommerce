@@ -854,12 +854,32 @@
 				var id = '';
 				var qty = 1;
 				if ($button && $button.length) {
-					id = $button.attr('data-product_id') || '';
+					id = $button.attr('data-product_id') || idFromAddToCartHref($button.attr('href')) || '';
 					qty = parseInt($button.attr('data-quantity') || '1', 10) || 1;
 				}
 				fireAddToCart(id, qty);
 			});
 		}
+		// Plain `?add-to-cart=` links — the shop loop of many themes, and the
+		// fallback WooCommerce itself renders when AJAX add-to-cart is off.
+		// Measured on a live shop: the theme fired the AJAX event but its
+		// button carried no `data-product_id`, and a listing page has no
+		// product context to fall back on, so the event went out naming
+		// nothing. The id was in the href the whole time.
+		//
+		// Safe beside the AJAX handler above: fireAddToCart de-duplicates on
+		// the id within a short window, so a theme that does both reports once.
+		document.addEventListener('click', function (e) {
+			var link = e.target && e.target.closest ? e.target.closest('a[href*="add-to-cart="]') : null;
+			if (!link) {
+				return;
+			}
+			var id = idFromAddToCartHref(link.getAttribute('href'));
+			if (id) {
+				fireAddToCart(id, parseInt(link.getAttribute('data-quantity') || '1', 10) || 1);
+			}
+		}, true);
+
 		// Non-AJAX single product add-to-cart form.
 		document.addEventListener('submit', function (e) {
 			var form = e.target;
@@ -882,6 +902,16 @@
 			// step, and fireAddToCart falls back to the page's own product.
 			fireAddToCart(id, qty);
 		});
+	}
+
+	// The product id out of a WooCommerce add-to-cart URL, e.g.
+	// /cart/?add-to-cart=8001 or /?add-to-cart=8001&quantity=2.
+	function idFromAddToCartHref(href) {
+		if (!href) {
+			return '';
+		}
+		var m = String(href).match(/[?&]add-to-cart=(\d+)/);
+		return m ? m[1] : '';
 	}
 
 	// Guard against the same add-to-cart being reported twice (some themes fire
