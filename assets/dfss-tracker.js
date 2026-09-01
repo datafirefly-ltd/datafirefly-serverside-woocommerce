@@ -788,6 +788,27 @@
 				onPay();
 			}
 		});
+		// A shop with ONE payment method never fires the change above: the
+		// radio is pre-selected (often hidden), so the shopper has nothing to
+		// change and the step was missing from every such funnel. Placing the
+		// order is the other moment the customer has provided payment
+		// information, and it is the one GA4 documents for this event.
+		// Submit AND click, because a themed button can place the order
+		// without submitting the form.
+		document.addEventListener('submit', function (e) {
+			var f = e.target;
+			if (f && f.matches && f.matches('form.checkout, form.woocommerce-checkout')) {
+				onPay();
+			}
+		}, true);
+		document.addEventListener('click', function (e) {
+			var el = e.target && e.target.closest
+				? e.target.closest('#place_order, button[name="woocommerce_checkout_place_order"], .wc-block-components-checkout-place-order-button')
+				: null;
+			if (el) {
+				onPay();
+			}
+		}, true);
 	}
 
 	// purchase on the thank-you page — fully provided by PHP in EVENTS.purchase,
