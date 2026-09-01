@@ -534,7 +534,16 @@ class DFSS_Plugin
                     }
                     $qty = (int) $item->get_quantity();
                     $num_items += $qty;
-                    $line_total = (float) $item->get_total();
+                    // TAX INCLUDED, to match the order value sent just below.
+                    //
+                    // WooCommerce's `get_total()` on an ORDER is the grand
+                    // total with tax and shipping; on an order ITEM it is the
+                    // line NET of tax. Same method name, opposite basis. The
+                    // connector used both without noticing, so a merchant read
+                    // a tax-inclusive figure in the headline and tax-exclusive
+                    // ones in the product table, and the two never added up.
+                    // PrestaShop was right all along: it uses `price_wt`.
+                    $line_total = (float) $item->get_total() + (float) $item->get_total_tax();
                     $products[] = array(
                         'id' => (string) $item->get_product_id(),
                         'name' => $item->get_name(),
