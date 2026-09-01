@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.17.0
+ * Version:           2.17.1
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.17.0');
+define('DFSS_VERSION', '2.17.1');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -531,7 +531,7 @@ class DFSS_Plugin
                     // The post TYPE is part of the id so an article and a page
                     // that share a number stay two distinct lines.
                     'id' => $dfss_post->post_type . '-' . (int) $dfss_post->ID,
-                    'name' => wp_strip_all_tags(get_the_title($dfss_post)),
+                    'name' => html_entity_decode(wp_strip_all_tags(get_the_title($dfss_post)), ENT_QUOTES, 'UTF-8'),
                     'category' => $dfss_post->post_type,
                 );
             }
@@ -567,7 +567,7 @@ class DFSS_Plugin
                     }
                     $dfss_items[] = array(
                         'id' => $dfss_p->post_type . '-' . (int) $dfss_p->ID,
-                        'name' => wp_strip_all_tags(get_the_title($dfss_p)),
+                        'name' => html_entity_decode(wp_strip_all_tags(get_the_title($dfss_p)), ENT_QUOTES, 'UTF-8'),
                         'category' => $dfss_p->post_type,
                     );
                 }
@@ -587,7 +587,7 @@ class DFSS_Plugin
                 $dfss_term = get_queried_object();
                 if ($dfss_term instanceof WP_Term) {
                     $dfss_list_id = $dfss_term->taxonomy . '-' . $dfss_term->slug;
-                    $dfss_list_name = wp_strip_all_tags($dfss_term->name);
+                    $dfss_list_name = html_entity_decode(wp_strip_all_tags($dfss_term->name), ENT_QUOTES, 'UTF-8');
                 }
             } elseif (is_post_type_archive()) {
                 $dfss_list_id = 'post-type-' . (string) get_query_var('post_type');
