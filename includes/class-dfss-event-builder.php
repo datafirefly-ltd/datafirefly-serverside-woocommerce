@@ -469,6 +469,13 @@ class DFSS_Event_Builder
             $d['currency'] = strtoupper($currency);
         }
         $d['value'] = round((float) $order->get_total(), 2);
+        // The same order net of tax. `value` stays what the customer was
+        // charged, because that is what the ad platforms optimise on; this is
+        // what the merchant reads in their own books, and for a B2B shop
+        // selling downloads it is the only figure that means anything. Sent
+        // rather than derived: a total says nothing about how much of it was
+        // tax, and a shop with mixed rates cannot be guessed at.
+        $d['valueNet'] = round((float) $order->get_total() - (float) $order->get_total_tax(), 2);
         $d['orderId'] = (string) $order->get_order_number();
 
         $products = array();
@@ -487,7 +494,12 @@ class DFSS_Event_Builder
             if ($qty > 0) {
                 $line['quantity'] = $qty;
             }
-            $line_total = (float) $item->get_total();
+            // WC_Order::get_total() is the order total WITH tax; on an order
+            // ITEM the identically-named method is the line NET of tax. Same
+            // name, opposite basis. Using it raw here made the product lines
+            // tax-exclusive while the headline above was tax-inclusive, so the
+            // two never added up — the same divergence the page context had.
+            $line_total = (float) $item->get_total() + (float) $item->get_total_tax();
             $line['price'] = $qty > 0 ? round($line_total / $qty, 2) : round($line_total, 2);
             $products[] = $line;
         }
