@@ -1,0 +1,29 @@
+# DataFirefly Server-Side — deny direct web access to the plugin's source.
+#
+# WordPress loads these files itself; none of them is ever meant to be
+# requested over HTTP. The REST routes live under /wp-json/, not here.
+#
+# Every PHP file already carries an `if (!defined('ABSPATH')) exit;` guard, so
+# this is defence in depth rather than the only lock — it also covers the
+# non-PHP files (readme, changelog) that a guard cannot protect.
+#
+# WHAT IS DELIBERATELY NOT DENIED: assets. The storefront fetches
+# assets/dfss-tracker.js and the admin fetches assets/dfss-admin.js by URL —
+# denying them would switch off the tracking this plugin exists to provide.
+# Extensions are listed explicitly for that reason: a blanket "deny all" here
+# would be a silent outage on every shop that installed the update.
+#
+# On a server that ignores .htaccess (nginx), nothing changes and nothing
+# breaks: the ABSPATH guards still stand.
+
+<IfModule mod_authz_core.c>
+    <FilesMatch "\.(php|md|txt|sql|log|bak|inc|dist|json|lock|ya?ml|sh|twig|tpl)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "\.(php|md|txt|sql|log|bak|inc|dist|json|lock|ya?ml|sh|twig|tpl)$">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
