@@ -223,6 +223,10 @@ class DFSS_Event_Builder
                     continue; // schema requires a product id
                 }
                 $line = array('id' => (string) $p['id']);
+                $dfss_gid = self::canonical_product_id($line['id']);
+                if ($dfss_gid !== '') {
+                    $line['groupId'] = $dfss_gid;
+                }
                 if (!empty($p['name']) && is_string($p['name'])) {
                     $line['name'] = $p['name'];
                 }
@@ -268,6 +272,105 @@ class DFSS_Event_Builder
         }
 
         return $d;
+    }
+
+    /**
+     * The same record's id in the shop's DEFAULT language, when a translation
+     * layer splits one product across several posts.
+     *
+     * WPML and Polylang do not translate a product in place: each language is
+     * its own post, with its own id. Nothing downstream can tell that two ids
+     * are one product, so the console counted each language separately and
+     * every language showed a fraction of the real figure. On our own shop,
+     * 5127 "Module de recherche avancee" and 5128 "Advanced Search Module"
+     * are one module.
+     *
+     * Resolved HERE, in PHP, rather than in the browser: this is the only
+     * place the translation plugin's API exists, and doing it in the event
+     * builder covers every product line at once - the ones the page sent us
+     * and the ones we build ourselves from an order.
+     *
+     * The product's own `id` is deliberately left untouched. It is what the
+     * advertising platforms match against the merchant's product feed, and a
+     * multilingual feed carries the per-language ids: folding them there would
+     * break catalogue matching to fix a reporting problem.
+     *
+     * Returns '' when there is nothing to fold - no translation plugin, an id
+     * that is not a post (a SKU, a bare string), or a product that already IS
+     * the default-language one. The caller then sends no grouping key and the
+     * dispatcher groups on the plain id exactly as it always has.
+     *
+     * @param string $id
+     *
+     * @return string
+     */
+    private static function canonical_product_id($id)
+    {
+        static $memo = array();
+
+        $id = (string) $id;
+        if ($id === '') {
+            return '';
+        }
+        if (isset($memo[$id])) {
+            return $memo[$id];
+        }
+
+        // Content lines carry a "<post_type>-<id>" id (see the content list in
+        // the main plugin file); products carry a bare numeric one. Both are
+        // translated, so both are folded - an institutional site running
+        // Polylang splits its articles exactly the way a shop splits its
+        // products.
+        $prefix = '';
+        $post_id = 0;
+        if (ctype_digit($id)) {
+            $post_id = (int) $id;
+        } elseif (preg_match('/^([A-Za-z0-9_]+)-(\d+)$/', $id, $m)) {
+            $prefix = $m[1] . '-';
+            $post_id = (int) $m[2];
+        }
+        if ($post_id <= 0) {
+            $memo[$id] = '';
+
+            return '';
+        }
+
+        $canonical = 0;
+
+        // Polylang.
+        if (function_exists('pll_get_post') && function_exists('pll_default_language')) {
+            $default = pll_default_language();
+            if (is_string($default) && $default !== '') {
+                $found = pll_get_post($post_id, $default);
+                if (is_numeric($found) && (int) $found > 0) {
+                    $canonical = (int) $found;
+                }
+            }
+        }
+
+        // WPML. `true` as the fourth argument means "return the original when
+        // this object has no translation in that language", which is what we
+        // want: a product the merchant never translated is its own group.
+        if ($canonical === 0 && has_filter('wpml_object_id')) {
+            $default = apply_filters('wpml_default_language', null);
+            $type = get_post_type($post_id);
+            if (is_string($default) && $default !== '' && is_string($type) && $type !== '') {
+                $found = apply_filters('wpml_object_id', $post_id, $type, true, $default);
+                if (is_numeric($found) && (int) $found > 0) {
+                    $canonical = (int) $found;
+                }
+            }
+        }
+
+        if ($canonical === 0 || $canonical === $post_id) {
+            $memo[$id] = ''; // nothing to fold
+
+            return '';
+        }
+
+        $memo[$id] = $prefix . (string) $canonical;
+
+        return $memo[$id];
     }
 
     /**
@@ -499,6 +602,10 @@ class DFSS_Event_Builder
             $qty = (int) $item->get_quantity();
             $num_items += $qty;
             $line = array('id' => (string) $item->get_product_id());
+            $dfss_gid = self::canonical_product_id($line['id']);
+            if ($dfss_gid !== '') {
+                $line['groupId'] = $dfss_gid;
+            }
             $name = $item->get_name();
             if ($name) {
                 $line['name'] = $name;

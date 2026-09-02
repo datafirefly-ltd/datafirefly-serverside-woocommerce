@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.17.3
+ * Version:           2.18.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.17.3');
+define('DFSS_VERSION', '2.18.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -1114,7 +1114,7 @@ class DFSS_Plugin
                             <td>
                                 <label>
                                     <input type="checkbox" name="dfss_require_consent" value="1" <?php checked(1, (int) $o['require_consent']); ?> />
-                                    <?php esc_html_e('Do not fire anything until marketing consent is granted (WP Consent API, Complianz, Cookiebot, IAB TCF).', 'datafirefly-serverside'); ?>
+                                    <?php esc_html_e('Do not fire anything until marketing consent is granted. Detected without configuration: WP Consent API, Complianz, DataFirefly Cookie Consent, Cookiebot, IAB TCF v2, Didomi, Usercentrics, CookieYes, Iubenda, OneTrust, Cookiehub, Osano, Borlabs, Klaro, tarteaucitron.', 'datafirefly-serverside'); ?>
                                 </label>
                                 <?php if (!DFSS_Consent::has_wp_consent_api()) : ?>
                                     <p class="description"><?php esc_html_e('Tip: install the WP Consent API plugin for the most reliable consent signal.', 'datafirefly-serverside'); ?></p>

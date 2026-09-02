@@ -200,6 +200,355 @@
 		return u;
 	}
 
+	// ---- DFSS-CONSENT-CORE:BEGIN (genere — ne pas editer ici) --------------
+	/**
+	 * Marketing-consent detection, shared verbatim by the three storefront
+	 * trackers (WooCommerce, PrestaShop, Shopware).
+	 *
+	 * WHY THIS FILE EXISTS
+	 *
+	 * Each tracker grew its own consent detection, and they drifted apart. The
+	 * WooCommerce one read Cookiebot and IAB TCF; the PrestaShop one read
+	 * tarteaucitron; the Shopware one read a single cookie name the merchant had
+	 * to type in by hand. So the SAME consent tool answered on one platform and
+	 * was invisible on another, and "invisible" here does not mean degraded — the
+	 * resolver denies when it understands nothing, so the merchant's tracking was
+	 * silently switched off with no error anywhere. A merchant cannot debug that:
+	 * the banner works, the module says it is active, and no event arrives.
+	 *
+	 * This is now ONE implementation, generated into all three by
+	 * scripts/sync-consent-core.py. Do not edit the copies — they are overwritten,
+	 * and CI fails when they have drifted.
+	 *
+	 * CONTRACT
+	 *
+	 *   DFSS_CMP.granted(opts) -> true | false | null
+	 *       true  : a tool we understand says marketing consent is granted
+	 *       false : a tool we understand says it is refused
+	 *       null  : no tool we understand answered — the caller falls back to its
+	 *               own platform signal, and denies if that says nothing either.
+	 *
+	 *   DFSS_CMP.bind(onChange)
+	 *       Subscribe to every "the visitor changed their mind" signal we know.
+	 *
+	 * The three-state return is the whole point. A boolean would force this file
+	 * to invent an answer for a shop running a CMP it has never heard of, and the
+	 * safe invention (deny) would override a platform signal that DID know.
+	 */
+	var DFSS_CMP = (function () {
+		'use strict';
+
+		function readCookie(name) {
+			try {
+				var m = document.cookie.match(
+					new RegExp('(?:^|; )' + String(name).replace(/([.*+?^${}()|[\]\\])/g, '\\$1') + '=([^;]*)')
+				);
+				return m ? decodeURIComponent(m[1]) : '';
+			} catch (e) {
+				return '';
+			}
+		}
+
+		// Each probe returns true/false when it recognises its tool, or null when
+		// that tool is simply not on the page. Order is deliberate: our own banner
+		// first (a shop running it has chosen it), then the IAB framework (which
+		// answers for a whole family of CMPs at once), then the named tools.
+		var PROBES = [
+			// DataFirefly Cookie Consent — our own banner.
+			function () {
+				if (window.dfcc && typeof window.dfcc.hasConsent === 'function') {
+					return !!window.dfcc.hasConsent('marketing');
+				}
+				return null;
+			},
+
+			// IAB TCF v2 / v2.2. Purposes 3 and 4 are "create a personalised ads
+			// profile" and "select personalised ads" — the pair every advertising
+			// destination needs. This single probe answers for Didomi, Sirdata,
+			// Quantcast, consentmanager, CookieFirst and Usercentrics when they run
+			// in TCF mode, which is how most of them run in the EU.
+			function () {
+				if (typeof window.__tcfapi !== 'function') {
+					return null;
+				}
+				var out = null;
+				try {
+					// The CMP may answer asynchronously. We only accept the answer
+					// if it lands synchronously; otherwise the listeners bound by
+					// bind() will re-run this once the CMP is ready.
+					window.__tcfapi('getTCData', 2, function (data, ok) {
+						if (ok && data && data.purpose && data.purpose.consents) {
+							out = !!(data.purpose.consents[3] && data.purpose.consents[4]);
+						}
+					});
+				} catch (e) {}
+				return out;
+			},
+
+			// Cookiebot.
+			function () {
+				if (window.Cookiebot && window.Cookiebot.consent) {
+					return !!window.Cookiebot.consent.marketing;
+				}
+				return null;
+			},
+
+			// Didomi, outside TCF mode.
+			function () {
+				if (window.Didomi && typeof window.Didomi.getUserConsentStatusForPurpose === 'function') {
+					var v = window.Didomi.getUserConsentStatusForPurpose('advertising_personalization');
+					if (v === true || v === false) {
+						return v;
+					}
+					v = window.Didomi.getUserConsentStatusForPurpose('cookies');
+					if (v === true || v === false) {
+						return v;
+					}
+				}
+				return null;
+			},
+
+			// Usercentrics v2 (Cookiebot-owned since 2023, still its own SDK).
+			function () {
+				try {
+					if (window.UC_UI && typeof window.UC_UI.getServicesBaseInfo === 'function') {
+						var services = window.UC_UI.getServicesBaseInfo();
+						if (services && services.length) {
+							for (var i = 0; i < services.length; i++) {
+								var s = services[i] || {};
+								var cat = String(s.categorySlug || s.category || '').toLowerCase();
+								if (cat.indexOf('marketing') !== -1 || cat.indexOf('advertis') !== -1) {
+									if (s.consent && s.consent.status === true) {
+										return true;
+									}
+								}
+							}
+							return false; // it answered, and no marketing service is on
+						}
+					}
+				} catch (e) {}
+				return null;
+			},
+
+			// CookieYes.
+			function () {
+				try {
+					if (typeof window.getCkyConsent === 'function') {
+						var c = window.getCkyConsent();
+						if (c && c.categories) {
+							return !!(c.categories.advertisement || c.categories.marketing);
+						}
+					}
+				} catch (e) {}
+				return null;
+			},
+
+			// Iubenda. Purpose 5 is "Measurement", 4 is "Targeting & Advertising".
+			function () {
+				try {
+					if (window._iub && window._iub.cs && window._iub.cs.consent) {
+						var p = window._iub.cs.consent.purposes;
+						if (p) {
+							return !!p[4];
+						}
+						if (typeof window._iub.cs.consent.consent === 'boolean') {
+							return window._iub.cs.consent.consent;
+						}
+					}
+				} catch (e) {}
+				return null;
+			},
+
+			// OneTrust / CookiePro. C0004 is OneTrust's own id for "Targeting
+			// Cookies" and is the default in every template they ship.
+			function () {
+				try {
+					var groups = window.OnetrustActiveGroups || window.OptanonActiveGroups;
+					if (typeof groups === 'string' && groups !== '') {
+						return groups.indexOf('C0004') !== -1;
+					}
+				} catch (e) {}
+				return null;
+			},
+
+			// Cookiehub.
+			function () {
+				try {
+					if (window.cookiehub && typeof window.cookiehub.hasConsented === 'function') {
+						return !!window.cookiehub.hasConsented('marketing');
+					}
+				} catch (e) {}
+				return null;
+			},
+
+			// Osano.
+			function () {
+				try {
+					if (window.Osano && window.Osano.cm && typeof window.Osano.cm.getConsent === 'function') {
+						var c = window.Osano.cm.getConsent();
+						if (c && typeof c.MARKETING === 'string') {
+							return c.MARKETING === 'ACCEPT';
+						}
+					}
+				} catch (e) {}
+				return null;
+			},
+
+			// Borlabs Cookie v3, then v2.
+			function () {
+				try {
+					var b = window.BorlabsCookie;
+					if (b && b.Consents && typeof b.Consents.hasConsent === 'function') {
+						return !!b.Consents.hasConsent('marketing');
+					}
+					if (b && typeof b.hasCookieGroupConsent === 'function') {
+						return !!b.hasCookieGroupConsent('marketing');
+					}
+				} catch (e) {}
+				return null;
+			},
+
+			// Klaro.
+			function () {
+				try {
+					if (window.klaro && typeof window.klaro.getManager === 'function') {
+						var consents = window.klaro.getManager().consents;
+						if (consents && typeof consents === 'object') {
+							var names = ['google-ads', 'googleAds', 'facebook', 'meta-pixel', 'marketing', 'advertising'];
+							for (var i = 0; i < names.length; i++) {
+								if (consents[names[i]] === true) {
+									return true;
+								}
+							}
+							return false;
+						}
+					}
+				} catch (e) {}
+				return null;
+			},
+		];
+
+		/**
+		 * tarteaucitron, which is configuration-driven rather than category-driven:
+		 * the merchant tells us which of its "services" count as advertising, so
+		 * this probe needs opts and cannot live in the list above.
+		 */
+		function tarteaucitron(opts) {
+			var jobs = (opts && opts.adJobs) || [];
+			if (!jobs.length) {
+				return null;
+			}
+			var i;
+			// In-memory state is more current than the cookie mid-pageview.
+			try {
+				if (window.tarteaucitron && window.tarteaucitron.state) {
+					for (i = 0; i < jobs.length; i++) {
+						if (window.tarteaucitron.state[jobs[i]] === true) {
+							return true;
+						}
+					}
+				}
+			} catch (e) {}
+			var raw = readCookie((opts && opts.cookieName) || 'tarteaucitron');
+			if (raw) {
+				var choices = null;
+				try {
+					choices = JSON.parse(raw);
+				} catch (e) {}
+				if (choices && typeof choices === 'object') {
+					for (i = 0; i < jobs.length; i++) {
+						if (choices[jobs[i]] === true || choices[jobs[i]] === 'true') {
+							return true;
+						}
+					}
+					return false; // it answered: cookie present, no ad service granted
+				}
+			}
+			return null;
+		}
+
+		function granted(opts) {
+			for (var i = 0; i < PROBES.length; i++) {
+				var v = null;
+				try {
+					v = PROBES[i]();
+				} catch (e) {
+					v = null;
+				}
+				if (v === true || v === false) {
+					return v;
+				}
+			}
+			return tarteaucitron(opts || {});
+		}
+
+		/**
+		 * Every "the visitor changed their mind" signal we know, on both document
+		 * and window because CMPs disagree about which one they fire on. Binding a
+		 * listener for a tool that is not present costs nothing.
+		 */
+		function bind(onChange, opts) {
+			var docEvents = [
+				'dfcc_consent_change',          // our own banner
+				'cmplz_status_change',          // Complianz
+				'cmplz_enable_category',
+				'wp_listen_for_consent_change', // WP Consent API
+				'CookieConfiguration_Update',   // Shopware's built-in banner
+				'cookiehub.changed',
+				'klaro-consent-change',
+				'tarteaucitron.load',
+			];
+			var winEvents = [
+				'CookiebotOnAccept',
+				'CookiebotOnConsentReady',
+				'UC_UI_CMP_EVENT',
+				'usercentrics_consent_changed',
+				'borlabs-cookie-consent-saved',
+			];
+			var i;
+			for (i = 0; i < docEvents.length; i++) {
+				try {
+					document.addEventListener(docEvents[i], onChange);
+				} catch (e) {}
+			}
+			for (i = 0; i < winEvents.length; i++) {
+				try {
+					window.addEventListener(winEvents[i], onChange);
+				} catch (e) {}
+			}
+			// tarteaucitron announces each service by name.
+			var jobs = (opts && opts.adJobs) || [];
+			for (i = 0; i < jobs.length; i++) {
+				try {
+					document.addEventListener(jobs[i] + '_added', onChange);
+				} catch (e) {}
+			}
+			// Didomi and Osano use callback queues rather than DOM events.
+			try {
+				window.didomiEventListeners = window.didomiEventListeners || [];
+				window.didomiEventListeners.push({ event: 'consent.changed', listener: onChange });
+			} catch (e) {}
+			try {
+				if (window.Osano && window.Osano.cm && typeof window.Osano.cm.addEventListener === 'function') {
+					window.Osano.cm.addEventListener('osano-cm-consent-saved', onChange);
+				}
+			} catch (e) {}
+			// IAB TCF pushes its own updates.
+			try {
+				if (typeof window.__tcfapi === 'function') {
+					window.__tcfapi('addEventListener', 2, function (data, ok) {
+						if (ok && data && (data.eventStatus === 'useractioncomplete' || data.eventStatus === 'tcloaded')) {
+							onChange();
+						}
+					});
+				}
+			} catch (e) {}
+		}
+
+		return { granted: granted, bind: bind };
+	})();
+	// ---- DFSS-CONSENT-CORE:END ---------------------------------------------
+
 	// ---- consent ------------------------------------------------------------
 
 	// Resolve current marketing-consent state across the supported stacks.
@@ -217,40 +566,27 @@
 			} catch (e) {}
 		}
 
-		// 1. Official WP Consent API (cookie-backed; exposed on the page).
+		// 1. The WordPress-native path, kept AHEAD of the shared detection: on a
+		// WordPress site the official Consent API is the agreed answer, and a
+		// plugin that implements it has said so deliberately.
 		if (typeof window.wp_has_consent === 'function') {
 			try {
 				return !!window.wp_has_consent('marketing');
 			} catch (e) {}
 		}
-
-		// 2. Complianz.
 		if (CONSENT.cmp === 'complianz' && window.cmplz && typeof window.cmplz.has_consent === 'function') {
 			try {
 				return !!window.cmplz.has_consent('marketing');
 			} catch (e) {}
 		}
 
-		// 3. Cookiebot.
-		if (window.Cookiebot && window.Cookiebot.consent) {
-			try {
-				return !!window.Cookiebot.consent.marketing;
-			} catch (e) {}
-		}
-
-		// 4. IAB TCF v2 — treat "marketing" as purposes 3+4 (advertising) granted.
-		if (typeof window.__tcfapi === 'function') {
-			var tcfResult = null;
-			try {
-				window.__tcfapi('getTCData', 2, function (data, ok) {
-					if (ok && data && data.purpose && data.purpose.consents) {
-						tcfResult = !!(data.purpose.consents[3] && data.purpose.consents[4]);
-					}
-				});
-			} catch (e) {}
-			if (tcfResult !== null) {
-				return tcfResult;
-			}
+		// 2. Every other consent tool, through the detection shared byte-for-byte
+		// with the PrestaShop and Shopware trackers. Cookiebot and IAB TCF used to
+		// live here in full and only here, which is how a Cookiebot shop on
+		// PrestaShop got no tracking at all.
+		var shared = DFSS_CMP.granted(CONSENT);
+		if (shared !== null) {
+			return shared;
 		}
 
 		// Required but no signal we understand -> deny (privacy-first).
@@ -291,27 +627,10 @@
 			return;
 		}
 		consentListenersBound = true;
-
-		// DataFirefly Cookie Consent (our own banner) — fires on accept/reject.
-		document.addEventListener('dfcc_consent_change', flushPending);
-		// WP Consent API dispatches this on every change.
-		document.addEventListener('wp_listen_for_consent_change', flushPending);
-		// Complianz.
-		document.addEventListener('cmplz_status_change', flushPending);
-		document.addEventListener('cmplz_enable_category', flushPending);
-		// Cookiebot.
-		window.addEventListener('CookiebotOnAccept', flushPending);
-		window.addEventListener('CookiebotOnConsentReady', flushPending);
-		// TCF.
-		if (typeof window.__tcfapi === 'function') {
-			try {
-				window.__tcfapi('addEventListener', 2, function (data, ok) {
-					if (ok && data && (data.eventStatus === 'useractioncomplete' || data.eventStatus === 'tcloaded')) {
-						flushPending();
-					}
-				});
-			} catch (e) {}
-		}
+		// One list, shared with the other two trackers: a CMP whose "the visitor
+		// changed their mind" event is missing here does not fail loudly, it just
+		// leaves the queue unflushed until the next page.
+		DFSS_CMP.bind(flushPending, CONSENT);
 	}
 
 	// ---- client tag injection (PUBLIC ids only) -----------------------------

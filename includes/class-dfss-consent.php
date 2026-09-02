@@ -76,6 +76,18 @@ class DFSS_Consent
             return (bool) wp_has_consent('marketing');
         }
 
+        // Every other consent tool, read from its own cookie. Purely additive:
+        // this only speaks where the code above said nothing, and where it used
+        // to fall through to "allow" on the assumption that the browser gate had
+        // already decided. That assumption does not hold for the events the
+        // browser never sees — an order created in the back office, a gateway
+        // callback, a webhook replay — and those were being forwarded whatever
+        // the shopper had answered.
+        $cmp = self::dfssCmpFromCookies($_COOKIE);
+        if ($cmp !== null) {
+            return $cmp;
+        }
+
         // No machine-readable server signal: the client gate is authoritative.
         // The tracker does not beacon unless consent was granted, so allow.
         return true;
@@ -166,4 +178,197 @@ class DFSS_Consent
             'hasWpConsentApi' => self::has_wp_consent_api(),
         );
     }
+
+    // ---- DFSS-CONSENT-COOKIES:BEGIN (genere — ne pas editer ici) --------
+    // ---------------------------------------------------------------------
+    // Shared server-side consent detection.
+    //
+    // The browser tracker and the PHP layer are two different gates on the
+    // same shop, and they were reading different things. Unifying only the
+    // browser would have made it worse, not better: a PrestaShop shop running
+    // Cookiebot would start sending its page views (the browser gate now
+    // understands Cookiebot) while its purchases stayed blocked (the PHP gate
+    // still only understood tarteaucitron) — the two gates disagreeing about
+    // the same visitor, and the most valuable event the one that goes missing.
+    //
+    // So the PHP layer gets the same treatment: one implementation, generated
+    // into all three connectors by the dispatcher's sync-consent-core.py, and
+    // a test that fails when the copies drift.
+    //
+    // What a server CAN read is cookies, so that is what this does. Several
+    // consent tools write a plainly readable verdict; those are covered. Two
+    // are deliberately NOT:
+    //
+    //   - Usercentrics keeps its verdict per service under names that change
+    //     between versions. Guessing would produce a confident wrong answer,
+    //     which is worse here than no answer.
+    //   - Klaro and Osano's JS-only setups leave nothing server-readable.
+    //
+    // For those, this returns null and the caller falls back to its own
+    // platform signal — exactly as before. Nothing regresses.
+    // ---------------------------------------------------------------------
+
+    /**
+     * Marketing consent as the CMP wrote it into a cookie.
+     *
+     * @param array $cookies Usually $_COOKIE, or the framework's cookie bag.
+     *
+     * @return bool|null true/false when a tool we understand answered, null
+     *                   when none of them is present.
+     */
+    public static function dfssCmpFromCookies($cookies)
+    {
+        if (!is_array($cookies) || empty($cookies)) {
+            return null;
+        }
+
+        $get = function ($name) use ($cookies) {
+            return isset($cookies[$name]) && is_scalar($cookies[$name])
+                ? (string) $cookies[$name]
+                : '';
+        };
+
+        // Cookiebot. The value is JSON-ish but not valid JSON (unquoted keys),
+        // so it is matched textually rather than decoded.
+        $v = $get('CookieConsent');
+        if ($v !== '') {
+            $v = urldecode($v);
+            if (preg_match('/marketing\s*:\s*(true|false)/i', $v, $m)) {
+                return strtolower($m[1]) === 'true';
+            }
+        }
+
+        // Complianz writes one cookie per category.
+        $v = $get('cmplz_marketing');
+        if ($v !== '') {
+            return strtolower(trim($v)) === 'allow';
+        }
+
+        // CookieYes.
+        $v = $get('cookieyes-consent');
+        if ($v !== '') {
+            $v = urldecode($v);
+            if (preg_match('/advertisement\s*:\s*(yes|no)/i', $v, $m)) {
+                return strtolower($m[1]) === 'yes';
+            }
+        }
+
+        // OneTrust / CookiePro. C0004 is their own id for "Targeting Cookies"
+        // and is the default in every template they ship.
+        $v = $get('OptanonConsent');
+        if ($v !== '') {
+            $v = urldecode($v);
+            if (strpos($v, 'C0004') !== false) {
+                return strpos($v, 'C0004:1') !== false;
+            }
+        }
+
+        // Osano.
+        $v = $get('osano_consentmanager');
+        if ($v !== '') {
+            $v = urldecode($v);
+            if (preg_match('/MARKETING["\']?\s*[:=]\s*["\']?(ACCEPT|DENY)/i', $v, $m)) {
+                return strtoupper($m[1]) === 'ACCEPT';
+            }
+        }
+
+        // Cookiehub.
+        $v = $get('cookiehub');
+        if ($v !== '') {
+            $v = urldecode($v);
+            if (preg_match('/marketing["\']?\s*:\s*["\']?(true|1|false|0)/i', $v, $m)) {
+                return in_array(strtolower($m[1]), array('true', '1'), true);
+            }
+        }
+
+        // Borlabs Cookie: real JSON, "consents" keyed by category.
+        $v = $get('borlabs-cookie');
+        if ($v !== '') {
+            $json = json_decode(urldecode($v), true);
+            if (is_array($json)) {
+                $consents = isset($json['consents']) && is_array($json['consents'])
+                    ? $json['consents']
+                    : $json;
+                if (array_key_exists('marketing', $consents)) {
+                    $marketing = $consents['marketing'];
+                    return !empty($marketing);
+                }
+            }
+        }
+
+        // Iubenda: one cookie per site id, so the name has to be searched for.
+        foreach ($cookies as $name => $raw) {
+            if (strpos((string) $name, '_iub_cs-') !== 0 || !is_scalar($raw)) {
+                continue;
+            }
+            $json = json_decode(urldecode((string) $raw), true);
+            if (is_array($json) && isset($json['purposes']) && is_array($json['purposes'])) {
+                // Purpose 4 is "Targeting & Advertising".
+                if (array_key_exists(4, $json['purposes'])) {
+                    return !empty($json['purposes'][4]);
+                }
+                if (array_key_exists('4', $json['purposes'])) {
+                    return !empty($json['purposes']['4']);
+                }
+            }
+        }
+
+        // IAB TCF v2, last because decoding it costs the most and every CMP
+        // above that also speaks TCF has already answered.
+        $v = $get('euconsent-v2');
+        if ($v !== '') {
+            $tcf = self::dfssCmpTcfPurposes($v);
+            if ($tcf !== null) {
+                return $tcf;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Purposes 3 AND 4 of an IAB TCF v2 consent string.
+     *
+     * The core string is a fixed bit layout, so the two bits we need sit at
+     * known offsets: 6 (version) + 36 (created) + 36 (lastUpdated) + 12 (cmpId)
+     * + 12 (cmpVersion) + 6 (consentScreen) + 12 (consentLanguage) + 12
+     * (vendorListVersion) + 6 (tcfPolicyVersion) + 1 (isServiceSpecific) + 1
+     * (useNonStandardTexts) + 12 (specialFeatureOptIns) = 152, then 24 purpose
+     * bits. Purpose N is bit 152 + (N - 1).
+     *
+     * Returns null on anything that does not decode, never false: a string we
+     * failed to read is not a refusal.
+     *
+     * @param string $tc
+     *
+     * @return bool|null
+     */
+    private static function dfssCmpTcfPurposes($tc)
+    {
+        // Only the core segment, which is everything before the first dot.
+        $core = explode('.', (string) $tc);
+        $core = $core[0];
+        if ($core === '') {
+            return null;
+        }
+        $b64 = strtr($core, '-_', '+/');
+        $pad = strlen($b64) % 4;
+        if ($pad > 0) {
+            $b64 .= str_repeat('=', 4 - $pad);
+        }
+        $bits = base64_decode($b64, true);
+        if (!is_string($bits) || strlen($bits) < 22) {
+            return null; // 176 bits are needed to reach purpose 24
+        }
+        // Version must be 2; anything else is not this layout.
+        if (((ord($bits[0]) >> 2) & 0x3F) !== 2) {
+            return null;
+        }
+        $bit = function ($n) use ($bits) {
+            return (ord($bits[(int) floor($n / 8)]) >> (7 - ($n % 8))) & 1;
+        };
+
+        return $bit(152 + 2) === 1 && $bit(152 + 3) === 1;
+    }
+    // ---- DFSS-CONSENT-COOKIES:END ---------------------------------------
 }

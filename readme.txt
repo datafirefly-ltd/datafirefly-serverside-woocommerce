@@ -17,7 +17,7 @@ DataFirefly Server-Side delivers complete, reliable WooCommerce conversion track
 * **Full funnel** — page view, product view, add to cart, initiate checkout, add payment info, purchase.
 * **Dual delivery, deduplicated** — every event fires a light client pixel (Meta / GA4 / TikTok) **and** a signed server-side event sharing the same event id, so ad blockers never cost you a conversion and nothing is ever counted twice.
 * **Per-destination control** — enable or disable the Meta, GA4 and TikTok client tags individually. A disabled destination's third-party script (and its cookies) is never loaded in your visitors' browsers.
-* **GDPR-aware** — nothing fires until marketing consent is granted (DataFirefly Cookie Consent, WP Consent API, Complianz, Cookiebot, IAB TCF v2).
+* **GDPR-aware** — nothing fires until marketing consent is granted. Recognised without configuration: DataFirefly Cookie Consent, WP Consent API, Complianz, Cookiebot, IAB TCF v2, Didomi, Usercentrics, CookieYes, Iubenda, OneTrust, Cookiehub, Osano, Borlabs, Klaro, tarteaucitron — in the browser and on the server, the same list as the PrestaShop and Shopware modules.
 * **Reliable** — failed sends are queued and retried with exponential backoff; an Activity panel shows delivery status live.
 * **Secure by design** — no destination credential ever reaches the browser; the HMAC secret never leaves the server; the public beacon endpoint is rate-limited, size-capped and strictly sanitized; purchase events are server-authoritative and cannot be spoofed.
 
