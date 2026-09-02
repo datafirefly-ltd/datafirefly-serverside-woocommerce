@@ -9,7 +9,7 @@ One connection key configures everything. No destination credentials (Meta CAPI
 token, GA4 API secret, TikTok Events API token) ever touch the browser — they
 live only on the DataFirefly Server-Side dispatcher.
 
-> The official WooCommerce connector for **[DataFirefly Server-Side](https://server-side.datafirefly.com/en/)** — server-side conversion tracking for Meta, GA4 and TikTok.
+> The official WooCommerce connector for **[DataFirefly Server-Side](https://server-side.datafirefly.com/en/)** — server-side conversion tracking for Meta CAPI / GA4 / Google Ads / TikTok / Pinterest / Microsoft Advertising / ChatGPT Ads.
 
 ![Version](https://img.shields.io/badge/version-2.2.0-008D9E)
 ![WordPress](https://img.shields.io/badge/WordPress-5.8%2B-21759b)
@@ -65,7 +65,7 @@ WooCommerce order hook ──▶ signed server purchase ────────
 
 The plugin only ever holds **public** pixel ids. The signing secret and every
 destination API token stay on the DataFirefly Server-Side dispatcher, which fans
-the events out to Meta Conversions API, GA4 Measurement Protocol and the TikTok
+the events out to all seven destinations: Meta Conversions API, GA4 Measurement Protocol, Google Ads, TikTok
 Events API.
 
 ## Requirements
