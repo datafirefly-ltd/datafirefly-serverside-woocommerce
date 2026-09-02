@@ -1152,9 +1152,31 @@
 				return;
 			}
 			paymentInfoSent = true;
+			// Les MEMES lignes produit que initiate_checkout, lues dans le meme
+			// contexte. Elles manquaient : l'etape ne portait que la valeur et
+			// la devise, donc GA4 affichait un add_payment_info sans articles
+			// et Meta recevait un AddPaymentInfo sans contents — moins de
+			// matiere pour le rapprochement, et une etape du tunnel qu'on ne
+			// pouvait pas ventiler par produit alors que celle d'avant et
+			// celle d'apres le pouvaient.
+			var apiProducts = (c.products || []).map(function (p) {
+				return { id: String(p.id), name: p.name, price: num(p.price), quantity: num(p.quantity) };
+			});
 			track('add_payment_info', {
-				clientData: { value: num(c.value), currency: c.currency },
-				beaconData: { currency: c.currency, value: num(c.value) }
+				clientData: {
+					value: num(c.value),
+					currency: c.currency,
+					numItems: num(c.numItems),
+					contentIds: apiProducts.map(function (p) { return p.id; }),
+					items: apiProducts.map(function (p) { return { item_id: p.id, item_name: p.name, price: p.price, quantity: p.quantity }; }),
+					contents: apiProducts.map(function (p) { return { content_id: p.id, content_name: p.name, price: p.price, quantity: p.quantity }; })
+				},
+				beaconData: {
+					currency: c.currency,
+					value: num(c.value),
+					numItems: num(c.numItems),
+					products: apiProducts
+				}
 			});
 		}
 		// Classic checkout exposes payment method radios in this container.
