@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 2.20.0
+Stable tag: 2.20.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -41,6 +41,9 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.20.1 =
+* Fix: on a stock storefront, the fix in 2.20.0 also silenced the grid's own click tracking, which reads the product id off the grid item. The grid now keeps wiring select_item (exact) while the server keeps naming the list (authoritative ids), and the content-list fallback stands down so only one select_item is sent.
 
 = 2.20.0 =
 * Fix: on a product category page, products were listed as content: id "product-5127" instead of 5127, and the category "product" instead of the category name. GA4 item_id and Meta content_ids match a merchant's product feed, whose ids are bare, so those list events matched nothing, silently. Single product pages were never affected.

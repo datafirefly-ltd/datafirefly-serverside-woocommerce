@@ -1557,20 +1557,13 @@
 	// Twenty Twenty-*). Only used when the merchant did NOT tag a
 	// [data-df-item-list] on the page.
 	var WOO_GRID_ITEM = 'ul.products li.product, .wp-block-woocommerce-product-template li.product';
+	// Set once wireWooProductGrid() has attached its click handler, so the
+	// content-list fallback below does not attach a second one for the same grid.
+	var wooGridOwnsClicks = false;
 
 	function wireWooProductGrid() {
 		if (document.querySelector('[data-df-item-list]')) {
 			return; // convention in use — do not double-detect
-		}
-		// The server already listed this page (a product category archive, the
-		// blog index...). Scraping the same grid from the DOM would send a
-		// SECOND view_item_list for one page view, and a second select_item on
-		// one click, with ids read from markup instead of from WordPress.
-		// Our own theme does not match WOO_GRID_ITEM so nothing doubled here;
-		// a shop on a stock storefront would have doubled silently.
-		var served = EVENTS.contentList;
-		if (served && served.products && served.products.length) {
-			return;
 		}
 		var lis = document.querySelectorAll(WOO_GRID_ITEM);
 		if (!lis.length) { return; }
@@ -1610,11 +1603,24 @@
 			var p = wooItem(lis[i]);
 			if (p) { products.push(p); }
 		}
-		if (products.length) {
+		// Do NOT list the page twice. On a product category archive the server
+		// already sent view_item_list, with ids read from WordPress rather than
+		// scraped from markup. Our own theme does not match WOO_GRID_ITEM so
+		// nothing ever doubled here; a shop on a stock storefront (Storefront,
+		// verified) sent two of them for one page view, silently.
+		//
+		// The CLICKS stay wired all the same, and that is the point of splitting
+		// the two: this handler finds the product by its grid item, which is
+		// exact, where the content-list fallback has to match the link text
+		// against the title and misses a click on the product image. So the
+		// server names the list, the DOM names what was clicked.
+		var servedList = EVENTS.contentList && EVENTS.contentList.products && EVENTS.contentList.products.length;
+		if (products.length && !servedList) {
 			track('view_item_list', { beaconData: { listName: listName, products: products } });
 		}
 
 		// select_item on product-link clicks inside the grid (classic or block).
+		wooGridOwnsClicks = true;
 		document.addEventListener('click', function (e) {
 			var li = e.target && e.target.closest ? e.target.closest(WOO_GRID_ITEM) : null;
 			if (!li) { return; }
@@ -1925,6 +1931,10 @@
 	function wireContentListClicks() {
 		var l = EVENTS.contentList;
 		if (!l || !l.products || !l.products.length) { return; }
+		// A WooCommerce grid on the same page already wires clicks, and does it
+		// better: it reads the product id off the item, this one matches the
+		// link text against the title. Two handlers would send two select_item.
+		if (wooGridOwnsClicks) { return; }
 		document.addEventListener('click', function (e) {
 			var a = firstMatch(e.target, 'a[href]');
 			if (!a) { return; }
