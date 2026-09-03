@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.20.1
+ * Version:           2.21.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.20.1');
+define('DFSS_VERSION', '2.21.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -769,7 +769,12 @@ class DFSS_Plugin
                     // PrestaShop was right all along: it uses `price_wt`.
                     $line_total = (float) $item->get_total() + (float) $item->get_total_tax();
                     $products[] = array(
-                        'id' => (string) $item->get_product_id(),
+                        // The VARIATION when the line has one: get_product_id()
+                        // returns the parent, and every other funnel step
+                        // already reports the variation. Both purchase paths
+                        // must agree, or the browser pixel and the server event
+                        // would name two different products for one sale.
+                        'id' => DFSS_Event_Builder::order_line_id($item),
                         'name' => $item->get_name(),
                         'price' => $qty > 0 ? round($line_total / $qty, 2) : round($line_total, 2),
                         'quantity' => $qty,

@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 2.20.1
+Stable tag: 2.21.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -41,6 +41,9 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.21.0 =
+* Fix: on a variable product, the purchase event reported the PARENT product while add-to-cart, cart, checkout and payment all reported the variation. The product that was added was never the product that was bought: the funnel split at the last step, and the conversion reached Meta and GA4 with ids matching neither the earlier events nor the variation lines of the product feed. Nothing changes for simple products.
 
 = 2.20.1 =
 * Fix: on a stock storefront, the fix in 2.20.0 also silenced the grid's own click tracking, which reads the product id off the grid item. The grid now keeps wiring select_item (exact) while the server keeps naming the list (authoritative ids), and the content-list fallback stands down so only one select_item is sent.

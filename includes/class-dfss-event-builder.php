@@ -275,6 +275,35 @@ class DFSS_Event_Builder
     }
 
     /**
+     * The id to report for an order line: the VARIATION when the line has one.
+     *
+     * `WC_Order_Item_Product::get_product_id()` returns the PARENT of a
+     * variable product, never the variation. Every other step of the funnel
+     * already reports the variation: the add-to-cart form sends
+     * `variation_id`, and the cart, checkout and payment contexts read
+     * `$item['data']->get_id()`, which on a cart line IS the
+     * WC_Product_Variation. Purchase was the only step reporting the parent.
+     *
+     * So on any shop selling sizes or colours, the product that was added was
+     * never the product that was bought: the funnel split in two at the last
+     * step, adds landing on one row of the console and purchases on another,
+     * and the conversion reaching Meta and GA4 with ids that match neither the
+     * add-to-cart events nor the variation lines of the merchant's feed.
+     *
+     * Nothing changes for a simple product: get_variation_id() returns 0.
+     *
+     * @param WC_Order_Item_Product $item
+     *
+     * @return string
+     */
+    public static function order_line_id($item)
+    {
+        $variation = (int) $item->get_variation_id();
+
+        return (string) ($variation > 0 ? $variation : $item->get_product_id());
+    }
+
+    /**
      * The same record's id in the shop's DEFAULT language, when a translation
      * layer splits one product across several posts.
      *
@@ -601,7 +630,7 @@ class DFSS_Event_Builder
             }
             $qty = (int) $item->get_quantity();
             $num_items += $qty;
-            $line = array('id' => (string) $item->get_product_id());
+            $line = array('id' => self::order_line_id($item));
             $dfss_gid = self::canonical_product_id($line['id']);
             if ($dfss_gid !== '') {
                 $line['groupId'] = $dfss_gid;
