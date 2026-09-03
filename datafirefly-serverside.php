@@ -609,7 +609,7 @@ class DFSS_Plugin
                     // console: it is what GA4 matches as item_id and what Meta
                     // matches as content_ids AGAINST THE MERCHANT'S PRODUCT
                     // FEED, whose ids are bare. A prefixed id matches nothing,
-                    // silently — no error anywhere, just category pages that
+                    // silently: no error anywhere, just category pages that
                     // never attribute and dynamic ads that never retarget.
                     if ('product' === $dfss_p->post_type && function_exists('is_product')) {
                         $dfss_items[] = array(
