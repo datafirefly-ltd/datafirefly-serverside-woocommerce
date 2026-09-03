@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.19.1
+ * Version:           2.20.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.19.1');
+define('DFSS_VERSION', '2.20.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -503,6 +503,40 @@ class DFSS_Plugin
     }
 
     /**
+     * The product category to report for a product line, as a human name.
+     *
+     * The archive's own term when we are on one - that is the list the visitor
+     * is actually looking at - and otherwise the product's first category.
+     * Returns '' when WooCommerce is absent or the product has no category;
+     * the builder then simply sends no category rather than an empty one.
+     *
+     * Never the post type: "product" as a GA4 item_category is the same word
+     * on every line of every report, which is worse than no value at all.
+     *
+     * @param int $post_id
+     *
+     * @return string
+     */
+    private function product_category_label($post_id)
+    {
+        if (is_tax('product_cat')) {
+            $dfss_term = get_queried_object();
+            if ($dfss_term instanceof WP_Term) {
+                return html_entity_decode(wp_strip_all_tags($dfss_term->name), ENT_QUOTES, 'UTF-8');
+            }
+        }
+        $dfss_terms = get_the_terms((int) $post_id, 'product_cat');
+        if (is_array($dfss_terms) && !empty($dfss_terms)) {
+            $dfss_first = reset($dfss_terms);
+            if ($dfss_first instanceof WP_Term) {
+                return html_entity_decode(wp_strip_all_tags($dfss_first->name), ENT_QUOTES, 'UTF-8');
+            }
+        }
+
+        return '';
+    }
+
+    /**
      * Build the per-page event context the tracker needs (server-authoritative
      * values for value/currency/products), so the browser never has to guess.
      *
@@ -563,6 +597,26 @@ class DFSS_Plugin
                 $dfss_posts = isset($wp_query->posts) && is_array($wp_query->posts) ? $wp_query->posts : array();
                 foreach (array_slice($dfss_posts, 0, 20) as $dfss_p) {
                     if (!$dfss_p instanceof WP_Post) {
+                        continue;
+                    }
+                    // A WooCommerce PRODUCT is not content, even when
+                    // WordPress serves it through an archive. The single-page
+                    // block above already excludes is_product(); this loop did
+                    // not, so every product category page sent its products as
+                    // "product-5127" with the category "product".
+                    //
+                    // The id shape is the part that matters outside our own
+                    // console: it is what GA4 matches as item_id and what Meta
+                    // matches as content_ids AGAINST THE MERCHANT'S PRODUCT
+                    // FEED, whose ids are bare. A prefixed id matches nothing,
+                    // silently — no error anywhere, just category pages that
+                    // never attribute and dynamic ads that never retarget.
+                    if ('product' === $dfss_p->post_type && function_exists('is_product')) {
+                        $dfss_items[] = array(
+                            'id' => (string) (int) $dfss_p->ID,
+                            'name' => html_entity_decode(wp_strip_all_tags(get_the_title($dfss_p)), ENT_QUOTES, 'UTF-8'),
+                            'category' => $this->product_category_label($dfss_p->ID),
+                        );
                         continue;
                     }
                     $dfss_items[] = array(

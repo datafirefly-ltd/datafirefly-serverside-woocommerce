@@ -1562,6 +1562,16 @@
 		if (document.querySelector('[data-df-item-list]')) {
 			return; // convention in use — do not double-detect
 		}
+		// The server already listed this page (a product category archive, the
+		// blog index...). Scraping the same grid from the DOM would send a
+		// SECOND view_item_list for one page view, and a second select_item on
+		// one click — with ids read from markup instead of from WordPress.
+		// Our own theme does not match WOO_GRID_ITEM so nothing doubled here;
+		// a shop on a stock storefront would have doubled silently.
+		var served = EVENTS.contentList;
+		if (served && served.products && served.products.length) {
+			return;
+		}
 		var lis = document.querySelectorAll(WOO_GRID_ITEM);
 		if (!lis.length) { return; }
 

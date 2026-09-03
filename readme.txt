@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 2.19.1
+Stable tag: 2.20.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -41,6 +41,10 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.20.0 =
+* Fix: on a product category page, products were listed as content — id "product-5127" instead of 5127, category "product" instead of the category name. GA4 item_id and Meta content_ids match a merchant's product feed, whose ids are bare, so those list events matched nothing, silently. Single product pages were never affected.
+* Fix: a stock WooCommerce storefront could send two view_item_list events for one category page (server list + DOM grid). The DOM grid now stands down when the server already listed the page.
 
 = 2.2.0 =
 * New: per-destination client-tag toggles (Meta, GA4, TikTok) — a disabled destination's script is never loaded.
