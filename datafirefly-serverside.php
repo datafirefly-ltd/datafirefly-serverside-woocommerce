@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.21.3
+ * Version:           2.21.4
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.21.3');
+define('DFSS_VERSION', '2.21.4');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -749,6 +749,16 @@ class DFSS_Plugin
                 $order_id = absint(wp_unslash($_GET['order-received']));
             }
             $order = $order_id ? wc_get_order($order_id) : null;
+            // The thank-you URL carries the order KEY next to the id, and
+            // WooCommerce itself refuses to render the order without it.
+            // Rendering the total and the lines from the id alone let anyone
+            // walk the ids and read every order of the shop (audit 2026-09-04).
+            // Same check as WC_Shortcode_Checkout::order_received().
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $order_key = isset($_GET['key']) ? wc_clean(wp_unslash($_GET['key'])) : '';
+            if ($order instanceof WC_Order && ($order_key === '' || !hash_equals((string) $order->get_order_key(), (string) $order_key))) {
+                $order = null;
+            }
             if ($order instanceof WC_Order) {
                 $products = array();
                 $num_items = 0;
@@ -1019,7 +1029,11 @@ class DFSS_Plugin
             $opts = array(
                 'enabled' => isset($_POST['dfss_enabled']) ? 1 : 0,
                 'tenant_id' => isset($_POST['dfss_tenant_id']) ? sanitize_text_field(wp_unslash($_POST['dfss_tenant_id'])) : '',
-                'hmac_secret' => isset($_POST['dfss_hmac_secret']) ? sanitize_text_field(wp_unslash($_POST['dfss_hmac_secret'])) : '',
+                // Empty field = keep the stored secret: the input never echoes it
+                // back (audit 2026-09-04), so a save must not wipe it.
+                'hmac_secret' => (isset($_POST['dfss_hmac_secret']) && trim((string) wp_unslash($_POST['dfss_hmac_secret'])) !== '')
+                    ? sanitize_text_field(wp_unslash($_POST['dfss_hmac_secret']))
+                    : $this->opts()['hmac_secret'],
                 'endpoint' => isset($_POST['dfss_endpoint']) ? esc_url_raw(wp_unslash($_POST['dfss_endpoint'])) : '',
                 'complete_tracking' => isset($_POST['dfss_complete_tracking']) ? 1 : 0,
                 'require_consent' => isset($_POST['dfss_require_consent']) ? 1 : 0,
@@ -1234,7 +1248,7 @@ class DFSS_Plugin
                     <form method="post" action="">
                         <?php wp_nonce_field('dfss_save', 'dfss_nonce'); ?>
                         <p>
-                            <input type="text" name="dfss_connkey" class="large-text code" placeholder="dfss_..." autocomplete="off" />
+                            <input type="password" name="dfss_connkey" class="large-text code" placeholder="dfss_..." autocomplete="off" />
                         </p>
                         <p>
                             <button type="submit" name="dfss_connect" class="button button-primary button-hero"><?php esc_html_e('Connect', 'datafirefly-serverside'); ?></button>
@@ -1254,7 +1268,7 @@ class DFSS_Plugin
                             <tr><th scope="row"><label for="dfss_tenant_id"><?php esc_html_e('Tenant ID', 'datafirefly-serverside'); ?></label></th>
                                 <td><input type="text" id="dfss_tenant_id" name="dfss_tenant_id" class="regular-text" value="<?php echo esc_attr($o['tenant_id']); ?>" /></td></tr>
                             <tr><th scope="row"><label for="dfss_hmac_secret"><?php esc_html_e('HMAC secret', 'datafirefly-serverside'); ?></label></th>
-                                <td><input type="text" id="dfss_hmac_secret" name="dfss_hmac_secret" class="regular-text" value="<?php echo esc_attr($o['hmac_secret']); ?>" /></td></tr>
+                                <td><input type="password" id="dfss_hmac_secret" name="dfss_hmac_secret" class="regular-text" value="" autocomplete="new-password" placeholder="<?php echo $o['hmac_secret'] !== '' ? esc_attr__('Configured. Leave empty to keep it.', 'datafirefly-serverside') : ''; ?>" /></td></tr>
                             <tr><th scope="row"><label for="dfss_endpoint"><?php esc_html_e('Endpoint', 'datafirefly-serverside'); ?></label></th>
                                 <td><input type="url" id="dfss_endpoint" name="dfss_endpoint" class="regular-text" value="<?php echo esc_attr($o['endpoint']); ?>" /></td></tr>
                             <tr><th scope="row"><?php esc_html_e('Complete tracking', 'datafirefly-serverside'); ?></th>
