@@ -26,9 +26,15 @@ class DFSS_Truth
      * a pending or cancelled order is not revenue, and counting it would make
      * the shop look under-tracked when the tracking is in fact correct.
      *
+     * `refunded` is a paid order too: the money came in, the purchase event
+     * was sent, and the refund is what the refund columns are for. Leaving it
+     * out made a fully refunded order vanish from BOTH sides of the day
+     * (neither a sale nor a refund), so the dispatcher saw one purchase event
+     * with no order behind it.
+     *
      * @var string[]
      */
-    private static $paid_statuses = array('processing', 'on-hold', 'completed');
+    private static $paid_statuses = array('processing', 'on-hold', 'completed', 'refunded');
 
     public static function schedule_cron()
     {
