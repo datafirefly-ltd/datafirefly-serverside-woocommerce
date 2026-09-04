@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.21.4
+ * Version:           2.22.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.21.4');
+define('DFSS_VERSION', '2.22.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -274,6 +274,12 @@ class DFSS_Plugin
      */
     public function capture_cookies($order, $data)
     {
+        // The consent verdict, read HERE where the shopper's cookies are, and
+        // kept on the order: the purchase hook may fire later from a gateway
+        // webhook that carries none. Audit 2026-09-04 (M1): the purchase never
+        // checked consent and labelled itself 'granted' regardless.
+        $order->update_meta_data('_dfss_consent', DFSS_Consent::server_verdict($this->opts()));
+
         $map = array('_fbp' => '_dfss_fbp', '_fbc' => '_dfss_fbc', '_ga' => '_dfss_ga', '_ttp' => '_dfss_ttp', '__oppref' => '_dfss_oppref', '__obref' => '_dfss_obref');
         foreach ($map as $cookie => $meta) {
             if (!empty($_COOKIE[$cookie])) {
@@ -387,8 +393,12 @@ class DFSS_Plugin
      * A visitor who signed in. Fired from wp_login, so a failed attempt never
      * reaches it — the browser could not tell the two apart.
      *
-     * Carries no personal data beyond what the connector already hashes for
-     * matching: the user id, not the address.
+     * Carries the user id only, and only with consent. The comment here used
+     * to promise "the user id, not the address" while the code below sent the
+     * e-mail in clear and said 'not_required' whatever the setting (audit
+     * 2026-09-04, F1). The sign-in request has the visitor's cookies, so the
+     * verdict is read right here; a refusal, or no readable signal, sends
+     * the bare event with no identity and no consent claim.
      *
      * @param string  $user_login
      * @param WP_User $user
@@ -400,26 +410,28 @@ class DFSS_Plugin
             if (empty($opts['enabled'])) {
                 return;
             }
+            $verdict = DFSS_Consent::server_verdict($opts);
             $payload = array(
                 'eventId' => 'login_' . ($user instanceof WP_User ? (int) $user->ID : 0) . '_' . time(),
                 'eventName' => 'login',
                 'eventTime' => time(),
                 'sourceUrl' => home_url('/'),
                 'actionSource' => 'website',
-                'consent' => 'not_required',
                 'userData' => array(),
             );
-            if ($user instanceof WP_User) {
-                $payload['userData']['externalId'] = (string) $user->ID;
-                if (is_email($user->user_email)) {
-                    $payload['userData']['email'] = $user->user_email;
+            if ($verdict !== 'denied') {
+                // 'denied' is not in the dispatcher enum (see build_purchase):
+                // the field is simply absent, never 'granted' by default.
+                $payload['consent'] = $verdict;
+                if ($user instanceof WP_User) {
+                    $payload['userData']['externalId'] = (string) $user->ID;
                 }
             }
 
             $client = new DFSS_Client($opts['tenant_id'], $opts['hmac_secret'], $opts['endpoint']);
             $result = $client->send($payload);
             DFSS_Queue::record_attempt($payload, $result, 'server');
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             // A sign-in must never fail because our measurement did.
         }
     }
@@ -1026,15 +1038,40 @@ class DFSS_Plugin
 
         // Manual save (advanced).
         if (isset($_POST['dfss_save'])) {
+            // The secret is validated against the same charset as decode_key()
+            // and stored VERBATIM. It went through sanitize_text_field here,
+            // which the key path forbids for the very reason that it can
+            // silently alter a valid secret into one that signs nothing
+            // (audit 2026-09-04, F3). Empty field = keep the stored secret:
+            // the input never echoes it back, so a save must not wipe it.
+            $secret = $this->opts()['hmac_secret'];
+            $typed = isset($_POST['dfss_hmac_secret']) ? trim((string) wp_unslash($_POST['dfss_hmac_secret'])) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated against a strict charset just below, never altered.
+            if ($typed !== '') {
+                if (!preg_match('/^[A-Za-z0-9+\/=_.\-]{1,512}$/', $typed)) {
+                    add_settings_error('dfss', 'badsecret', __('The HMAC secret contains characters that are not part of a DataFirefly secret. Copy it again from your client space.', 'datafirefly-serverside'), 'error');
+
+                    return;
+                }
+                $secret = $typed;
+            }
+
+            // Signed customer events go wherever this points, so it must be a
+            // well-formed HTTPS URL or nothing is saved (audit 2026-09-04, F2).
+            // wp_http_validate_url() also refuses the loopback and private
+            // ranges wp_safe_remote_post() would reject at send time anyway.
+            $endpoint = isset($_POST['dfss_endpoint']) ? esc_url_raw(wp_unslash($_POST['dfss_endpoint'])) : '';
+            $scheme = $endpoint !== '' ? wp_parse_url($endpoint, PHP_URL_SCHEME) : '';
+            if ($endpoint === '' || strtolower((string) $scheme) !== 'https' || !wp_http_validate_url($endpoint)) {
+                add_settings_error('dfss', 'badendpoint', __('The endpoint must be a valid https:// URL. Settings were not saved.', 'datafirefly-serverside'), 'error');
+
+                return;
+            }
+
             $opts = array(
                 'enabled' => isset($_POST['dfss_enabled']) ? 1 : 0,
                 'tenant_id' => isset($_POST['dfss_tenant_id']) ? sanitize_text_field(wp_unslash($_POST['dfss_tenant_id'])) : '',
-                // Empty field = keep the stored secret: the input never echoes it
-                // back (audit 2026-09-04), so a save must not wipe it.
-                'hmac_secret' => (isset($_POST['dfss_hmac_secret']) && trim((string) wp_unslash($_POST['dfss_hmac_secret'])) !== '')
-                    ? sanitize_text_field(wp_unslash($_POST['dfss_hmac_secret']))
-                    : $this->opts()['hmac_secret'],
-                'endpoint' => isset($_POST['dfss_endpoint']) ? esc_url_raw(wp_unslash($_POST['dfss_endpoint'])) : '',
+                'hmac_secret' => $secret,
+                'endpoint' => $endpoint,
                 'complete_tracking' => isset($_POST['dfss_complete_tracking']) ? 1 : 0,
                 'require_consent' => isset($_POST['dfss_require_consent']) ? 1 : 0,
                 'dest_meta' => isset($_POST['dfss_dest_meta']) ? 1 : 0,
@@ -1371,12 +1408,14 @@ class DFSS_Plugin
         $labels = array(
             DFSS_Queue::STATUS_DONE => __('Delivered', 'datafirefly-serverside'),
             DFSS_Queue::STATUS_PENDING => __('Queued (retry)', 'datafirefly-serverside'),
+            DFSS_Queue::STATUS_SENDING => __('Retrying', 'datafirefly-serverside'),
             DFSS_Queue::STATUS_FAILED => __('Rejected', 'datafirefly-serverside'),
             DFSS_Queue::STATUS_DROPPED => __('Gave up', 'datafirefly-serverside'),
         );
         $colors = array(
             DFSS_Queue::STATUS_DONE => '#008D9E',
             DFSS_Queue::STATUS_PENDING => '#b26a00',
+            DFSS_Queue::STATUS_SENDING => '#b26a00',
             DFSS_Queue::STATUS_FAILED => '#b32d2e',
             DFSS_Queue::STATUS_DROPPED => '#b32d2e',
         );

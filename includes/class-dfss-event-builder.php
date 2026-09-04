@@ -212,9 +212,10 @@ class DFSS_Event_Builder
         if (isset($in['value']) && self::is_finite_number($in['value']) && (float) $in['value'] >= 0) {
             $d['value'] = round((float) $in['value'], 2);
         }
-        if (!empty($in['orderId']) && is_string($in['orderId'])) {
-            $d['orderId'] = $in['orderId'];
-        }
+        // No orderId here: the purchase never comes through the beacon (see
+        // BEACON_EVENTS), so an order number in a browser payload can only be
+        // a claim nobody verified. Dropped at the route too (audit 2026-09-04,
+        // M5); the two allow-lists must agree.
 
         $products = array();
         if (!empty($in['products']) && is_array($in['products'])) {
@@ -482,15 +483,28 @@ class DFSS_Event_Builder
         $created = $order->get_date_created();
         $event_time = $created ? $created->getTimestamp() : time();
 
+        // Audit 2026-09-04 (M1): the purchase used to carry every billing
+        // field and say 'granted' without ever asking. The verdict now comes
+        // from the order itself (see purchase_consent()); a refusal strips the
+        // event down to the sale. The dispatcher schema only knows 'granted'
+        // and 'not_required' (event.ts, IncomingEventSchema.consent) and
+        // rejects the WHOLE event on any other value, so a refusal sends no
+        // consent field at all: normalised to 'unknown' on the other side,
+        // never mislabelled 'granted'. Sending 'denied' needs the dispatcher
+        // enum widened first.
+        $verdict = self::purchase_consent($order);
+
         $payload = array(
             'eventId' => 'order_' . $order->get_id(),
             'eventName' => 'purchase',
             'eventTime' => $event_time,
             'sourceUrl' => home_url('/'),
             'actionSource' => 'website',
-            'consent' => self::consent_state(),
-            'userData' => self::user_data($order),
+            'userData' => $verdict === 'denied' ? array() : self::user_data($order),
         );
+        if ($verdict !== 'denied') {
+            $payload['consent'] = $verdict;
+        }
 
         $event_data = self::event_data($order);
         if (!empty($event_data)) {
@@ -498,6 +512,42 @@ class DFSS_Event_Builder
         }
 
         return $payload;
+    }
+
+    /**
+     * The consent verdict that applies to an order's purchase event.
+     *
+     * The verdict was read from the shopper's cookies at checkout and stored
+     * as order meta (_dfss_consent, see DFSS_Plugin::capture_cookies()),
+     * because the purchase hook can run later from a gateway webhook where
+     * there is no browser to ask. Absent meta means the order was not created
+     * by the classic checkout (back office, API, blocks): a request with the
+     * shopper's cookies may still answer, an admin's cookies must not (they
+     * are the merchant's consent, not the customer's), and no signal is a
+     * refusal, as in the browser gate.
+     *
+     * @param WC_Order $order
+     *
+     * @return string 'granted'|'denied'|'not_required'
+     */
+    private static function purchase_consent($order)
+    {
+        $opts = get_option(DFSS_Plugin::OPTION, array());
+        $opts = is_array($opts) ? $opts : array();
+        if (!DFSS_Consent::is_required($opts)) {
+            return 'not_required';
+        }
+
+        $stored = (string) $order->get_meta('_dfss_consent');
+        if ($stored === 'granted' || $stored === 'denied') {
+            return $stored;
+        }
+
+        if (is_admin() || (function_exists('wp_doing_cron') && wp_doing_cron())) {
+            return 'denied';
+        }
+
+        return DFSS_Consent::server_verdict($opts);
     }
 
     /**

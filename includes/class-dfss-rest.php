@@ -43,6 +43,23 @@ class DFSS_REST
     // real abuse guards. Operators can refine the source IP via `dfss_client_ip`.
     const RATE_LIMIT_MAX = 120;       // requests...
     const RATE_LIMIT_WINDOW = 60;     // ...per this many seconds, per IP (rolling bucket)
+    // Upper bounds on the numbers a beacon may carry. A single 1e300 value
+    // would not crash anything, but it would sit in a merchant's revenue
+    // report as a fact (audit 2026-09-04, M5). Above the bound the field is
+    // dropped, never clamped: a clamped figure is still a fabricated one.
+    const MAX_VALUE = 10000000;       // 1e7, in the shop currency
+    const MAX_ITEMS = 10000;
+
+    /**
+     * Events the beacon only accepts on a VALID wp_rest nonce. They are the
+     * ones with no page context of their own to check against, so a forged
+     * beacon costs nothing and reads as a real lead, a real registration or
+     * a real payment step in the merchant's reports (audit 2026-09-04, M5).
+     * The rest of the funnel keeps the soft policy of permission_check().
+     *
+     * @var string[]
+     */
+    const NONCE_REQUIRED_EVENTS = array('lead', 'complete_registration', 'add_payment_info');
 
     /** @var callable():array A provider returning the current plugin options. */
     private $opts_provider;
@@ -162,12 +179,20 @@ class DFSS_REST
             return new WP_REST_Response(array('ok' => false, 'reason' => 'invalid'), 200);
         }
 
+        $nonce_ok = $this->nonce_is_valid($request);
+
+        // The events anyone could fabricate for free are not recorded without
+        // proof the beacon came from a page we served (see NONCE_REQUIRED_EVENTS).
+        if (!$nonce_ok && in_array($beacon['event_name'], self::NONCE_REQUIRED_EVENTS, true)) {
+            return new WP_REST_Response(array('ok' => false, 'reason' => 'nonce'), 200);
+        }
+
         // Identity is server-trusted only, AND only on a verified same-origin
         // request (valid wp_rest nonce). For a logged-in customer we attach their
         // email/id ourselves. The browser body is NEVER trusted for identity
         // (prevents a hostile beacon claiming someone's id). On a stale-nonce
         // cached page we still record the conversion, just without identity.
-        if ($this->nonce_is_valid($request)) {
+        if ($nonce_ok) {
             $beacon['user_data'] = array_merge(
                 $beacon['user_data'],
                 $this->server_identity()
@@ -228,6 +253,14 @@ class DFSS_REST
         $source_url = isset($body['source_url'])
             ? esc_url_raw(wp_unslash((string) $body['source_url']))
             : '';
+        // A page of THIS site, or the home page. The value is forwarded as the
+        // event's page_location and shows up in GA4 as if the visit happened
+        // there; a beacon naming another host would plant a foreign URL in the
+        // merchant's reports (audit 2026-09-04, M5). Referrers are legitimately
+        // external and stay untouched.
+        if ($source_url !== '' && !$this->is_own_host($source_url)) {
+            $source_url = home_url('/');
+        }
 
         $page_referrer = isset($body['page_referrer'])
             ? esc_url_raw(wp_unslash((string) $body['page_referrer']))
@@ -316,20 +349,21 @@ class DFSS_REST
                 $out['currency'] = $cur;
             }
         }
-        if (isset($in['value']) && is_numeric($in['value'])) {
+        if (isset($in['value']) && $this->within($in['value'], self::MAX_VALUE)) {
             $out['value'] = (float) $in['value'];
         }
         // Net of tax. The purchase goes server-side and never through this
         // beacon, but the allow-list is the contract for every event: a field
         // missing here is dropped in silence, which is how a value that IS
         // being sent still never arrives.
-        if (isset($in['valueNet']) && is_numeric($in['valueNet'])) {
+        if (isset($in['valueNet']) && $this->within($in['valueNet'], self::MAX_VALUE)) {
             $out['valueNet'] = (float) $in['valueNet'];
         }
-        if (!empty($in['orderId']) && is_scalar($in['orderId'])) {
-            $out['orderId'] = sanitize_text_field(wp_unslash((string) $in['orderId']));
-        }
-        if (isset($in['numItems']) && is_numeric($in['numItems'])) {
+        // No orderId: the purchase is server-authoritative and never comes
+        // through here (BEACON_EVENTS), so an order number in a beacon is a
+        // claim nobody verified (audit 2026-09-04, M5). The builder's
+        // allow-list dropped it too; both lists must agree.
+        if (isset($in['numItems']) && $this->within($in['numItems'], self::MAX_ITEMS)) {
             $out['numItems'] = (int) $in['numItems'];
         }
 
@@ -350,10 +384,10 @@ class DFSS_REST
                 if (!empty($p['category']) && is_scalar($p['category'])) {
                     $line['category'] = sanitize_text_field(wp_unslash((string) $p['category']));
                 }
-                if (isset($p['quantity']) && is_numeric($p['quantity'])) {
+                if (isset($p['quantity']) && $this->within($p['quantity'], self::MAX_ITEMS)) {
                     $line['quantity'] = (float) $p['quantity'];
                 }
-                if (isset($p['price']) && is_numeric($p['price'])) {
+                if (isset($p['price']) && $this->within($p['price'], self::MAX_VALUE)) {
                     $line['price'] = (float) $p['price'];
                 }
                 $products[] = $line;
@@ -504,6 +538,45 @@ class DFSS_REST
     }
 
     // --- helpers -------------------------------------------------------------
+
+    /**
+     * A finite number between 0 and $max inclusive. Anything else (negative,
+     * INF/NAN, "1e300", or plainly out of bounds) fails and the caller drops
+     * the field.
+     *
+     * @param mixed     $v
+     * @param int|float $max
+     *
+     * @return bool
+     */
+    private function within($v, $max)
+    {
+        if (!is_numeric($v)) {
+            return false;
+        }
+        $f = (float) $v;
+
+        return is_finite($f) && $f >= 0 && $f <= $max;
+    }
+
+    /**
+     * Is this URL on the site's own host (that of home_url())? Compared on
+     * the host only, case-insensitively; scheme, port and path are free.
+     *
+     * @param string $url
+     *
+     * @return bool
+     */
+    private function is_own_host($url)
+    {
+        $host = wp_parse_url($url, PHP_URL_HOST);
+        $own = wp_parse_url(home_url('/'), PHP_URL_HOST);
+        if (!is_string($host) || $host === '' || !is_string($own) || $own === '') {
+            return false;
+        }
+
+        return strtolower($host) === strtolower($own);
+    }
 
     /**
      * @return array

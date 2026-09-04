@@ -94,6 +94,46 @@ class DFSS_Consent
     }
 
     /**
+     * Consent verdict for an event the SERVER builds on its own: the purchase
+     * at checkout, the login. Unlike has_consent(), there is no browser gate
+     * to defer to here, so the fallback flips: no readable signal is a
+     * refusal, exactly as the tracker answers when it is required and cannot
+     * tell (hasMarketingConsent() in assets/dfss-tracker.js). Until the audit
+     * of 2026-09-04 (M1) the purchase never asked and shipped every billing
+     * field labelled 'granted' as soon as gating was switched on.
+     *
+     * Read at checkout and persisted on the order (_dfss_consent), because the
+     * purchase hook can fire later from a gateway callback with no cookies.
+     *
+     * @param array $opts Plugin options.
+     *
+     * @return string 'granted'|'denied'|'not_required'
+     */
+    public static function server_verdict($opts)
+    {
+        if (!self::is_required($opts)) {
+            return 'not_required';
+        }
+
+        $dfcc = self::dfcc_marketing_consent();
+        if ($dfcc !== null) {
+            return $dfcc ? 'granted' : 'denied';
+        }
+
+        if (function_exists('wp_has_consent')) {
+            return wp_has_consent('marketing') ? 'granted' : 'denied';
+        }
+
+        $cmp = self::dfssCmpFromCookies($_COOKIE);
+        if ($cmp !== null) {
+            return $cmp ? 'granted' : 'denied';
+        }
+
+        // Required, and nothing we can read said yes.
+        return 'denied';
+    }
+
+    /**
      * Marketing-consent decision from the DataFirefly Cookie Consent cookie,
      * read server-side. The cookie ("dfcc_consent") is base64(JSON) carrying a
      * `categories` map. Returns true/false, or null when the cookie is absent

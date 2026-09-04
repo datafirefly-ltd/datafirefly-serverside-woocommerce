@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 2.21.4
+Stable tag: 2.22.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -41,6 +41,16 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.22.0 =
+* Privacy: the server-side purchase event now honours the shopper's consent. The verdict is read from the consent cookie at checkout and stored on the order; when marketing consent was refused, or no consent signal can be read while "Require consent" is on, the purchase is sent with no personal data at all (no email, phone, name, address, IP, cookie or click id) and without a consent claim. It used to send every billing field and report itself as "granted" as soon as the setting was on, without checking.
+* Privacy: the login event no longer sends the account email; it carries the user id only, and only with consent.
+* Privacy: the retry queue keeps the event payload only while a row is still waiting to be replayed. Delivered and rejected rows keep their event name, id and HTTP code and nothing else, and finished rows are purged after 30 days.
+* New: deleting the plugin now removes its settings, the cached destination ids, the daily totals cursor, its cron hooks, its rate-limit transients and the retry queue table.
+* Security: the beacon endpoint requires a valid nonce for lead, complete_registration and add_payment_info, which have no page context to check against and could be forged for free. It no longer accepts an order id from the browser, drops a value above 10,000,000 or an item count above 10,000 rather than forwarding it, and replaces a source URL on another host by the shop's home page.
+* Security: the endpoint entered in the advanced form must be a valid https:// URL or nothing is saved, and every request to the dispatcher goes through wp_safe_remote_post().
+* Fix: an HMAC secret entered in the advanced form was run through sanitize_text_field, which can silently alter a valid secret; it is now validated against the same character set as the connection key and stored verbatim.
+* Fix: two overlapping retry runs could replay the same queued event twice. A row is now claimed atomically before it is sent, and a claim that never resolved goes back to the queue after ten minutes.
 
 = 2.21.4 =
 * Security: the thank-you page context is only built when the URL carries the order key, as WooCommerce itself requires. Without that check, anyone could read the total and the lines of any order by walking the order ids.

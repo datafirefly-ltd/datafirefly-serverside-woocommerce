@@ -44,6 +44,15 @@ class DFSS_Client
             return array('ok' => false, 'code' => 0, 'message' => 'not_configured');
         }
 
+        // An empty userData is a legitimate event since 2.22.0 (a purchase or a
+        // login without consent carries none). PHP encodes an empty array as
+        // `[]`, which the dispatcher's z.object() rejects, event and all; and
+        // the retry queue hands the payload back as an array whatever it was
+        // when first sent. So the fix lives here, on the only path out.
+        if (isset($payload['userData']) && $payload['userData'] === array()) {
+            $payload['userData'] = new stdClass();
+        }
+
         // The bytes we sign MUST be byte-for-byte the bytes we POST.
         $body = wp_json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         if ($body === false) {
@@ -186,7 +195,12 @@ class DFSS_Client
         // anything that is not exactly 64 lowercase hex chars.
         $signature = hash_hmac('sha256', $body, $this->secret);
 
-        $response = wp_remote_post(
+        // The safe variant: the URL is operator-supplied (Advanced form), and
+        // wp_safe_remote_post() refuses loopback, private ranges and odd
+        // ports, so a mistyped or hostile endpoint cannot turn the shop into
+        // an SSRF relay signing requests at its own network (audit
+        // 2026-09-04, F2).
+        $response = wp_safe_remote_post(
             $url,
             array(
                 // Tracking must never slow checkout: keep the timeout tight.
