@@ -80,8 +80,10 @@ class DFSS_Truth
                 }
                 update_option(self::LAST_SENT_OPTION, $day, false);
             }
-        } catch (Exception $e) {
-            // A failed report costs nothing.
+        } catch (Throwable $e) {
+            // A failed report costs nothing. Throwable, not Exception: a PHP
+            // Error raised here must not take the whole WP-Cron request down
+            // with it, which also silences every hook queued after this one.
             return;
         }
     }
@@ -138,7 +140,13 @@ class DFSS_Truth
 
         // WooCommerce reads these dates in the site's timezone, which is
         // exactly the day the shop means.
+        // `type` is NOT optional: without it wc_get_orders() also returns
+        // refund objects (WC_Order_Refund, which has no get_total_refunded()).
+        // The first refund of the shop then killed this job with a fatal, and
+        // since the cursor never advanced past that day, every night after it
+        // died on the same day: the dispatcher stopped hearing from the shop.
         $orders = wc_get_orders(array(
+            'type' => 'shop_order',
             'limit' => -1,
             'status' => self::$paid_statuses,
             'date_created' => $day . '...' . $day . ' 23:59:59',
