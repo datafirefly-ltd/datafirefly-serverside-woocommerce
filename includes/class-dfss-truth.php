@@ -145,8 +145,14 @@ class DFSS_Truth
         // The first refund of the shop then killed this job with a fatal, and
         // since the cursor never advanced past that day, every night after it
         // died on the same day: the dispatcher stopped hearing from the shop.
+        // `lang` => '' is NOT optional either: Polylang for WooCommerce joins
+        // every typed order query on the CURRENT language (the default one
+        // under WP-Cron), and the shop's orders in its other languages simply
+        // vanish from the count. Empty string is Polylang's "all languages".
+        // Harmless without Polylang: WooCommerce ignores the key.
         $orders = wc_get_orders(array(
             'type' => 'shop_order',
+            'lang' => '',
             'limit' => -1,
             'status' => self::$paid_statuses,
             'date_created' => $day . '...' . $day . ' 23:59:59',

@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 2.21.1
+Stable tag: 2.21.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -41,6 +41,9 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.21.2 =
+* Fix: on a shop running Polylang for WooCommerce, the daily totals only counted the orders placed in the site's default language: Polylang filters every typed order query on the current language, and under WP-Cron that is the default one. The orders placed in the shop's other languages were silently left out of the totals. The query now asks for all languages.
 
 = 2.21.1 =
 * Fix: the daily totals job (truth) died with a fatal error on the first day the shop had issued a refund, because the order query also returned refund objects. The cursor never moved past that day, so the job died again every night on the same day and the dispatcher stopped receiving the shop's daily totals. The query now asks for orders only, and the job no longer lets a PHP error take the whole cron request down.
