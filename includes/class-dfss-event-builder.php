@@ -486,12 +486,16 @@ class DFSS_Event_Builder
         // Audit 2026-09-04 (M1): the purchase used to carry every billing
         // field and say 'granted' without ever asking. The verdict now comes
         // from the order itself (see purchase_consent()); a refusal strips the
-        // event down to the sale. The dispatcher schema only knows 'granted'
-        // and 'not_required' (event.ts, IncomingEventSchema.consent) and
-        // rejects the WHOLE event on any other value, so a refusal sends no
-        // consent field at all: normalised to 'unknown' on the other side,
-        // never mislabelled 'granted'. Sending 'denied' needs the dispatcher
-        // enum widened first.
+        // event down to the sale.
+        //
+        // Since dispatcher 0.64.0 the schema knows 'denied', so a refusal is
+        // now SAID rather than left out. It used to send no consent field at
+        // all, which the dispatcher read as 'unknown': a shopper who had
+        // explicitly refused was indistinguishable from a shop that never
+        // asked, and the event was forwarded to the platforms all the same.
+        // A refused event is still sent here, because the sale is real and the
+        // merchant needs his denominator; the dispatcher records it and stops
+        // it there instead of forwarding it.
         $verdict = self::purchase_consent($order);
 
         $payload = array(
@@ -501,10 +505,8 @@ class DFSS_Event_Builder
             'sourceUrl' => home_url('/'),
             'actionSource' => 'website',
             'userData' => $verdict === 'denied' ? array() : self::user_data($order),
+            'consent' => $verdict,
         );
-        if ($verdict !== 'denied') {
-            $payload['consent'] = $verdict;
-        }
 
         $event_data = self::event_data($order);
         if (!empty($event_data)) {

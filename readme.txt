@@ -43,6 +43,7 @@ Yes. When "Require consent" is on (default), no tag is injected and no event is 
 == Changelog ==
 
 = 2.23.0 =
+* Privacy: a shopper who refuses consent is now reported as refused instead of not reported at all. Saying nothing read, on the dispatcher, exactly like a shop that never asks, and the sale was forwarded to the advertising platforms all the same. The sale itself is still reported, without any personal data, so the shop keeps its totals; the dispatcher records it and stops it there. Requires a dispatcher running 0.64.0 or later.
 * Security: the request timestamp is now part of the signed string, as version 2 of the dispatcher signature contract. Until now only the body was signed, so the timestamp header was unauthenticated and the dispatcher's five-minute window protected nothing: anyone who captured one signed request could replay it forever by sending it again with a fresh timestamp. Every signed call (events, daily totals, destination ids) now sends X-Dfss-Signature-Version: 2 and signs the timestamp, a line feed, then the exact bytes posted. Requires a dispatcher running 0.64.0 or later.
 
 = 2.22.1 =

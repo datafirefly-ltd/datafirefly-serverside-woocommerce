@@ -418,14 +418,13 @@ class DFSS_Plugin
                 'sourceUrl' => home_url('/'),
                 'actionSource' => 'website',
                 'userData' => array(),
+                // Since dispatcher 0.64.0 a refusal is said, not left out (see
+                // build_purchase). Saying nothing read as 'unknown', which is
+                // what a shop that never asked looks like.
+                'consent' => $verdict,
             );
-            if ($verdict !== 'denied') {
-                // 'denied' is not in the dispatcher enum (see build_purchase):
-                // the field is simply absent, never 'granted' by default.
-                $payload['consent'] = $verdict;
-                if ($user instanceof WP_User) {
-                    $payload['userData']['externalId'] = (string) $user->ID;
-                }
+            if ($verdict !== 'denied' && $user instanceof WP_User) {
+                $payload['userData']['externalId'] = (string) $user->ID;
             }
 
             $client = new DFSS_Client($opts['tenant_id'], $opts['hmac_secret'], $opts['endpoint']);
