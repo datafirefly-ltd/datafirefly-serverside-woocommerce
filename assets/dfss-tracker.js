@@ -29,7 +29,52 @@
 	var EVENTS = CFG.events || {}; // server-provided context for this page (e.g. purchase)
 	var REST = CFG.restUrl || '';
 	var NONCE = CFG.nonce || '';
+	var NONCE_URL = CFG.nonceUrl || '';
 	var COOKIE_DAYS = 90;
+
+	// The nonce baked into this page is only as fresh as the page itself. On a
+	// full-page cache it can be hours old, and lead / complete_registration /
+	// add_payment_info are refused on a stale one (2.22.0). So on the visitor's
+	// FIRST interaction (a bot that never touches the page never triggers it)
+	// we fetch a fresh nonce from a no-store endpoint; by the time a form is
+	// submitted it is in place. A failure keeps the baked-in nonce.
+	var nonceRefreshed = false;
+	function refreshNonce(done) {
+		if (!NONCE_URL || typeof window.fetch !== 'function') {
+			if (done) { done(); }
+			return;
+		}
+		try {
+			fetch(NONCE_URL, { credentials: 'same-origin', cache: 'no-store' })
+				.then(function (r) { return r.json(); })
+				.then(function (j) {
+					if (j && typeof j.nonce === 'string' && j.nonce) {
+						NONCE = j.nonce;
+						nonceRefreshed = true;
+					}
+					if (done) { done(); }
+				})
+				.catch(function () { if (done) { done(); } });
+		} catch (e) {
+			if (done) { done(); }
+		}
+	}
+	function armNonceRefresh() {
+		var fired = false;
+		function once() {
+			if (fired) { return; }
+			fired = true;
+			refreshNonce();
+		}
+		['pointerdown', 'keydown', 'touchstart', 'scroll'].forEach(function (ev) {
+			try {
+				window.addEventListener(ev, once, { once: true, passive: true });
+			} catch (e) {
+				window.addEventListener(ev, once);
+			}
+		});
+	}
+	armNonceRefresh();
 
 	// Guard: never run twice (e.g. if enqueued by a stray theme).
 	if (window.__dfssTrackerLoaded) {
@@ -1019,7 +1064,13 @@
 			return;
 		}
 
-		// Default path: fetch with the nonce header.
+		// Default path: fetch with the nonce header. A "nonce" refusal on a
+		// cached page is retried ONCE with a fresh nonce; sendBeacon above cannot
+		// read its answer, which is why the refresh is also armed at load.
+		sendWithFetch(payload, false);
+	}
+
+	function sendWithFetch(payload, retried) {
 		try {
 			fetch(REST, {
 				method: 'POST',
@@ -1030,6 +1081,13 @@
 					'X-WP-Nonce': NONCE
 				},
 				body: payload
+			}).then(function (r) {
+				if (retried || !r || !r.ok) { return; }
+				return r.json().then(function (j) {
+					if (j && j.ok === false && j.reason === 'nonce') {
+						refreshNonce(function () { sendWithFetch(payload, true); });
+					}
+				}).catch(function () {});
 			}).catch(function () {});
 		} catch (e) {}
 	}

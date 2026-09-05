@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 2.22.0
+Stable tag: 2.22.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -41,6 +41,9 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.22.1 =
+* Fix: on a site served from a full-page cache, the nonce baked into the HTML goes stale and the lead, complete_registration and add_payment_info beacons introduced in 2.22.0 would have been refused. The tracker now fetches a fresh nonce from a never-cached endpoint on the visitor's first interaction, and retries a refused beacon once.
 
 = 2.22.0 =
 * Privacy: the server-side purchase event now honours the shopper's consent. The verdict is read from the consent cookie at checkout and stored on the order; when marketing consent was refused, or no consent signal can be read while "Require consent" is on, the purchase is sent with no personal data at all (no email, phone, name, address, IP, cookie or click id) and without a consent claim. It used to send every billing field and report itself as "granted" as soon as the setting was on, without checking.

@@ -74,6 +74,26 @@ class DFSS_REST
 
     public function register_routes()
     {
+        // A fresh wp_rest nonce for the page's session. Full-page caches
+        // (LiteSpeed, WP Rocket, Cloudflare APO) serve HTML whose baked-in
+        // nonce rotates and goes stale, and since 2.22.0 lead /
+        // complete_registration / add_payment_info are refused without a valid
+        // one: on a cached site every form lead would be lost. The tracker asks
+        // here once, on the visitor's first interaction, and never on a cached
+        // response (no-store). For an anonymous visitor this is the same nonce
+        // WordPress would bake into an uncached page: it proves the request was
+        // made by a page of this site, not by a blind cross-site post. Core's
+        // admin-ajax `rest-nonce` answers 0 to anonymous visitors, hence this.
+        register_rest_route(
+            self::REST_NAMESPACE,
+            '/nonce',
+            array(
+                'methods' => 'GET',
+                'callback' => array($this, 'handle_nonce'),
+                'permission_callback' => '__return_true',
+            )
+        );
+
         register_rest_route(
             self::REST_NAMESPACE,
             self::ROUTE,
@@ -154,6 +174,22 @@ class DFSS_REST
      *
      * @return WP_REST_Response
      */
+    /**
+     * GET /nonce: see register_rest(). Never cacheable.
+     *
+     * @param WP_REST_Request $request
+     *
+     * @return WP_REST_Response
+     */
+    public function handle_nonce($request)
+    {
+        $response = new WP_REST_Response(array('nonce' => wp_create_nonce('wp_rest')), 200);
+        $response->header('Cache-Control', 'no-store, max-age=0');
+        $response->header('X-LiteSpeed-Cache-Control', 'no-cache');
+
+        return $response;
+    }
+
     public function handle_collect($request)
     {
         $opts = $this->opts();
