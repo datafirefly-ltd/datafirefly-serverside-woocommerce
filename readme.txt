@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 2.22.1
+Stable tag: 2.23.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -41,6 +41,9 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.23.0 =
+* Security: the request timestamp is now part of the signed string, as version 2 of the dispatcher signature contract. Until now only the body was signed, so the timestamp header was unauthenticated and the dispatcher's five-minute window protected nothing: anyone who captured one signed request could replay it forever by sending it again with a fresh timestamp. Every signed call (events, daily totals, destination ids) now sends X-Dfss-Signature-Version: 2 and signs the timestamp, a line feed, then the exact bytes posted. Requires a dispatcher running 0.64.0 or later.
 
 = 2.22.1 =
 * Fix: on a site served from a full-page cache, the nonce baked into the HTML goes stale and the lead, complete_registration and add_payment_info beacons introduced in 2.22.0 would have been refused. The tracker now fetches a fresh nonce from a never-cached endpoint on the visitor's first interaction, and retries a refused beacon once.

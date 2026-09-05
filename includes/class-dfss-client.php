@@ -4,9 +4,10 @@
  *
  * Signs an event payload with the tenant's HMAC secret and POSTs it to the
  * dispatcher, exactly per the dispatcher contract:
- *   X-Dfss-Tenant     : tenant id
- *   X-Dfss-Timestamp  : unix seconds (server checks a +/-300s window)
- *   X-Dfss-Signature  : hex HMAC-SHA256(rawBody, secret)
+ *   X-Dfss-Tenant            : tenant id
+ *   X-Dfss-Timestamp         : unix seconds (server checks a +/-300s window)
+ *   X-Dfss-Signature-Version : 2
+ *   X-Dfss-Signature         : hex HMAC-SHA256(timestamp + "\n" + rawBody, secret)
  *
  * Fail-safe: every error is captured and returned, never thrown, so a tracking
  * hiccup can never break the shop's checkout.
@@ -175,10 +176,16 @@ class DFSS_Client
     /**
      * Sign a raw body and POST it to a dispatcher URL.
      *
-     * Shared by send() and get_public_config() so the HMAC scheme lives in one
-     * place: headers X-Dfss-Tenant, X-Dfss-Timestamp (unix seconds, the server
-     * allows +/-300s and does NOT sign it), X-Dfss-Signature = lowercase hex
-     * HMAC-SHA256(rawBody, secret).
+     * Shared by send(), send_truth() and get_public_config() so the HMAC scheme
+     * lives in exactly one place and no signed call can be left behind on the
+     * old scheme: headers X-Dfss-Tenant, X-Dfss-Timestamp (unix seconds, the
+     * server allows a +/-300s window), X-Dfss-Signature-Version: 2, and
+     * X-Dfss-Signature = lowercase hex HMAC-SHA256(timestamp + LF + rawBody).
+     *
+     * The timestamp is inside the signed string since 2.23.0. Signing the body
+     * alone left the timestamp unauthenticated, so the dispatcher's +/-300s
+     * window protected nothing: a captured (body, signature) pair replayed with
+     * a fresh timestamp was accepted forever.
      *
      * Fail-safe: every error is captured and returned, never thrown.
      *
@@ -191,9 +198,11 @@ class DFSS_Client
     private function request($url, $body, $timeout = 4)
     {
         $timestamp = (string) time();
-        // hash_hmac() returns lowercase hex by default — the dispatcher rejects
-        // anything that is not exactly 64 lowercase hex chars.
-        $signature = hash_hmac('sha256', $body, $this->secret);
+        // The signed string is the timestamp, one LF, then the exact bytes we
+        // POST. hash_hmac() returns lowercase hex by default, and the
+        // dispatcher rejects anything that is not exactly 64 lowercase hex
+        // chars.
+        $signature = hash_hmac('sha256', $timestamp . "\n" . $body, $this->secret);
 
         // The safe variant: the URL is operator-supplied (Advanced form), and
         // wp_safe_remote_post() refuses loopback, private ranges and odd
@@ -210,6 +219,7 @@ class DFSS_Client
                     'Content-Type' => 'application/json',
                     'X-Dfss-Tenant' => $this->tenant_id,
                     'X-Dfss-Timestamp' => $timestamp,
+                    'X-Dfss-Signature-Version' => '2',
                     'X-Dfss-Signature' => $signature,
                 ),
                 'body' => $body,
