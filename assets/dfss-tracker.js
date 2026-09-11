@@ -496,13 +496,10 @@
 			} catch (e) {}
 			var raw = readCookie((opts && opts.cookieName) || 'tarteaucitron');
 			if (raw) {
-				var choices = null;
-				try {
-					choices = JSON.parse(raw);
-				} catch (e) {}
-				if (choices && typeof choices === 'object') {
+				var choices = parseTarteaucitronCookie(raw);
+				if (choices) {
 					for (i = 0; i < jobs.length; i++) {
-						if (choices[jobs[i]] === true || choices[jobs[i]] === 'true') {
+						if (choices[jobs[i]] === true) {
 							return true;
 						}
 					}
@@ -510,6 +507,55 @@
 				}
 			}
 			return null;
+		}
+
+		/**
+		 * tarteaucitron cookie -> { service: bool }. Two formats exist:
+		 *   native tarteaucitron.js:      "!gtag=true!facebookpixel=false!youtube=wait"
+		 *   legacy DataFirefly TAC 1.0.0: JSON object, possibly URL-encoded.
+		 *
+		 * Only the second was ever parsed here, with a bare JSON.parse. On a shop
+		 * running stock tarteaucitron — the overwhelming majority — the parse threw,
+		 * the probe returned null, and consent was never established: every
+		 * conversion was dropped, silently, on a shop whose visitors had said yes.
+		 *
+		 * "wait" means the visitor has not answered for that service and is dropped
+		 * rather than read as a refusal. Returns null when the cookie is unreadable,
+		 * which the caller treats as "no answer" — never as a denial.
+		 *
+		 * Mirrors DfSsConsent::parseTarteaucitronCookie() in shared/consent-cookies.php.
+		 */
+		function parseTarteaucitronCookie(raw) {
+			raw = String(raw || '');
+			if (!raw) {
+				return null;
+			}
+			var out = {};
+			if (raw.charAt(0) === '!') {
+				var re = /!([A-Za-z0-9_-]+)=(true|false|wait)/g;
+				var m;
+				while ((m = re.exec(raw)) !== null) {
+					if (m[2] !== 'wait') {
+						out[m[1]] = (m[2] === 'true');
+					}
+				}
+				return out;
+			}
+			var json = null;
+			try {
+				json = JSON.parse(raw);
+			} catch (e) {
+				try {
+					json = JSON.parse(decodeURIComponent(raw));
+				} catch (e2) {}
+			}
+			if (!json || typeof json !== 'object') {
+				return null;
+			}
+			Object.keys(json).forEach(function (k) {
+				out[k] = (json[k] === true || json[k] === 'true');
+			});
+			return out;
 		}
 
 		function granted(opts) {
