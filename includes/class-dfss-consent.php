@@ -216,6 +216,11 @@ class DFSS_Consent
             'required' => self::is_required($opts),
             'cmp' => self::detect_cmp(),
             'hasWpConsentApi' => self::has_wp_consent_api(),
+            // Deux decisions qui appartiennent au marchand, responsable de
+            // traitement, et non a nous. Une cle jamais ecrite vaut son defaut :
+            // propagation active, retenue eteinte.
+            'holdMinutes' => max(0, min(1440, isset($opts['consent_hold_minutes']) ? (int) $opts['consent_hold_minutes'] : 0)),
+            'clickIdPassthrough' => !isset($opts['clickid_passthrough']) || (int) $opts['clickid_passthrough'] !== 0,
         );
     }
 

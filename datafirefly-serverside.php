@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.24.0
+ * Version:           2.25.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.24.0');
+define('DFSS_VERSION', '2.25.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -195,6 +195,14 @@ class DFSS_Plugin
                 'dest_meta' => 1,
                 'dest_ga4' => 1,
                 'dest_tiktok' => 1,
+                // Nouveaux en 2.25.0. wp_parse_args ne complete que les cles
+                // ABSENTES : une boutique qui monte de version les recoit donc
+                // a ces valeurs, sans geste de sa part. La propagation est
+                // active — c'est elle qui sauve l'identifiant de clic ; la
+                // retenue est a zero, parce que c'est une decision de
+                // conformite et non un reglage technique.
+                'clickid_passthrough' => 1,
+                'consent_hold_minutes' => 0,
             )
         );
     }
@@ -1019,6 +1027,10 @@ class DFSS_Plugin
             $o['dest_meta'] = isset($_POST['dfss_dest_meta']) ? 1 : 0;
             $o['dest_ga4'] = isset($_POST['dfss_dest_ga4']) ? 1 : 0;
             $o['dest_tiktok'] = isset($_POST['dfss_dest_tiktok']) ? 1 : 0;
+            $o['clickid_passthrough'] = isset($_POST['dfss_clickid_passthrough']) ? 1 : 0;
+            // Borne a 24 h : au-dela, un evenement retenu n'a plus de rapport
+            // avec la visite qui l'a produit.
+            $o['consent_hold_minutes'] = max(0, min(1440, isset($_POST['dfss_consent_hold_minutes']) ? (int) $_POST['dfss_consent_hold_minutes'] : 0));
             update_option(self::OPTION, $o);
             add_settings_error('dfss', 'toggles', __('Tracking settings saved.', 'datafirefly-serverside'), 'updated');
 
@@ -1079,6 +1091,8 @@ class DFSS_Plugin
                 'dest_meta' => isset($_POST['dfss_dest_meta']) ? 1 : 0,
                 'dest_ga4' => isset($_POST['dfss_dest_ga4']) ? 1 : 0,
                 'dest_tiktok' => isset($_POST['dfss_dest_tiktok']) ? 1 : 0,
+                'clickid_passthrough' => isset($_POST['dfss_clickid_passthrough']) ? 1 : 0,
+                'consent_hold_minutes' => max(0, min(1440, isset($_POST['dfss_consent_hold_minutes']) ? (int) $_POST['dfss_consent_hold_minutes'] : 0)),
             );
             update_option(self::OPTION, $opts);
             if (!empty($opts['enabled']) && $opts['tenant_id'] !== '' && $opts['hmac_secret'] !== '') {
@@ -1319,6 +1333,16 @@ class DFSS_Plugin
                                     <label style="display:block;"><input type="checkbox" name="dfss_dest_meta" value="1" <?php checked(1, (int) $o['dest_meta']); ?> /> Meta</label>
                                     <label style="display:block;"><input type="checkbox" name="dfss_dest_ga4" value="1" <?php checked(1, (int) $o['dest_ga4']); ?> /> GA4</label>
                                     <label style="display:block;"><input type="checkbox" name="dfss_dest_tiktok" value="1" <?php checked(1, (int) $o['dest_tiktok']); ?> /> TikTok</label>
+                                </td></tr>
+                            <tr><th scope="row"><?php esc_html_e('Carry the ad click ID across pages', 'datafirefly-serverside'); ?></th>
+                                <td>
+                                    <label><input type="checkbox" name="dfss_clickid_passthrough" value="1" <?php checked(1, (int) ($o['clickid_passthrough'] ?? 1)); ?> /> <?php esc_html_e('Enabled', 'datafirefly-serverside'); ?></label>
+                                    <p class="description"><?php esc_html_e('A Google click ID only exists in the URL of the landing page. Without this, a shopper who arrives from an ad, browses, then accepts the banner has already lost it, and the sale can never be attributed. This carries it on your own internal links, in the URL only: nothing is written to the device, and it is never passed to another site. The cookie itself still waits for consent.', 'datafirefly-serverside'); ?></p>
+                                </td></tr>
+                            <tr><th scope="row"><?php esc_html_e('Hold events until consent (minutes)', 'datafirefly-serverside'); ?></th>
+                                <td>
+                                    <input type="number" min="0" max="1440" step="1" name="dfss_consent_hold_minutes" value="<?php echo esc_attr((string) ($o['consent_hold_minutes'] ?? 0)); ?>" class="small-text" />
+                                    <p class="description"><?php esc_html_e('A shopper who has not yet answered the banner is not a shopper who refused. With a value above zero, their events wait IN THEIR OWN BROWSER for that many minutes: nothing reaches your shop or DataFirefly. If they accept, the events are sent. If they refuse, or the delay passes, they are discarded. An explicit refusal is never held, whatever the value. Zero disables it, and zero is the default: this is a compliance decision, not a technical setting. Ask your data protection officer.', 'datafirefly-serverside'); ?></p>
                                 </td></tr>
                         </table>
                         <p><button type="submit" name="dfss_save" class="button"><?php esc_html_e('Save', 'datafirefly-serverside'); ?></button></p>

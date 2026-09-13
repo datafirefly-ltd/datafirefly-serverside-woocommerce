@@ -154,6 +154,209 @@
 	// Capture ad click ids from the URL into first-party cookies so the server
 	// can use them for matching long after the click. fbc has a Meta-prescribed
 	// format: fb.1.<ts>.<fbclid>.
+	// ---- ce que le navigateur doit encore faire pour Google Ads -------------
+	//
+	// Deux choses qu'un envoi serveur ne fera jamais, et qui sont parties avec
+	// GTM chez Drexco Medical le 8 septembre 2026 :
+	//
+	//   le REMARKETING DYNAMIQUE — une audience se construit avec le cookie du
+	//   visiteur. Aucun appel serveur ne peut la nourrir. Performance Max et
+	//   Shopping s'appuient dessus et s'assechent sans elle.
+	//
+	//   les conversions de type PAGE WEB — « Ajout Panier » enregistrait 44 a
+	//   67 signaux par jour. Le type d'une action est immuable apres creation :
+	//   un import ne peut pas l'alimenter, seul un tag la declenche.
+	//
+	// Ce ne sont pas des conversions dupliquees. Le remarketing n'en est pas
+	// une, et une action de type page web est une action DIFFERENTE de celle
+	// que le serveur alimente — Google ne dedoublonne qu'a action egale.
+
+	// ---- DFSS_TEST_EXPORT_GADS_START (pur, eprouve par tests/test-google-web-tags.mjs)
+	/** Les pages que Google reconnait, par evenement. */
+	var GADS_PAGETYPE = {
+		view_item: 'product',
+		view_item_list: 'category',
+		view_cart: 'cart',
+		add_to_cart: 'cart',
+		initiate_checkout: 'cart',
+		purchase: 'purchase'
+	};
+
+	/** Une page de categorie peut en lister des centaines ; Google n'en lit pas tant. */
+	var GADS_MAX_PRODIDS = 100;
+
+	/**
+	 * La charge utile du remarketing dynamique, ou null s'il n'y a pas de quoi.
+	 */
+	function dfssRemarketingPayload(conversionId, name, data) {
+		if (!conversionId || typeof conversionId !== 'string') {
+			return null;
+		}
+		var payload = {
+			send_to: conversionId,
+			ecomm_pagetype: GADS_PAGETYPE[name] || 'other'
+		};
+
+		var items = (data && data.items) || null;
+		if (Object.prototype.toString.call(items) === '[object Array]') {
+			var ids = [];
+			for (var i = 0; i < items.length && ids.length < GADS_MAX_PRODIDS; i++) {
+				var it = items[i];
+				var id = it && (it.id || it.item_id);
+				if (typeof id === 'string' && id !== '') {
+					ids.push(id);
+				}
+			}
+			if (ids.length) {
+				payload.ecomm_prodid = ids;
+			}
+		}
+
+		var v = data && data.value;
+		if (typeof v === 'number' && isFinite(v)) {
+			payload.ecomm_totalvalue = v;
+		}
+
+		return payload;
+	}
+
+	/**
+	 * La charge utile d'une conversion de type page web, ou null si cet
+	 * evenement n'a pas de libelle declare — le cas de presque tous.
+	 */
+	function dfssWebConversionPayload(conversionId, labels, name, data) {
+		if (!conversionId || typeof conversionId !== 'string') {
+			return null;
+		}
+		var label = labels && labels[name];
+		if (typeof label !== 'string' || label === '') {
+			return null;
+		}
+		var payload = { send_to: conversionId + '/' + label };
+		var d = data || {};
+		if (typeof d.value === 'number' && isFinite(d.value)) {
+			payload.value = d.value;
+		}
+		if (typeof d.currency === 'string' && d.currency !== '') {
+			payload.currency = d.currency;
+		}
+		// Le meme identifiant de transaction des deux cotes : c'est ce qui
+		// permet a Google de dedoublonner si la meme action venait a etre
+		// alimentee deux fois.
+		if (typeof d.orderId === 'string' && d.orderId !== '') {
+			payload.transaction_id = d.orderId;
+		}
+
+		return payload;
+	}
+	// ---- DFSS_TEST_EXPORT_GADS_END
+
+	// ---- retenue jusqu'au consentement --------------------------------------
+	//
+	// Trois etats, pas deux. Le tracker sait deja les distinguer — accorde,
+	// refuse, aucun signal lisible — puis ecrase le troisieme en refus. C'est
+	// prudent et ca jette la seule population recuperable : celui qui ignore la
+	// banniere, commande, puis accepte deux pages plus loin. Sa conversion
+	// n'existe jamais, alors qu'il a fini par dire oui.
+	//
+	// Un REFUS, lui, n'attend pas. Il ne se garde pas, il ne se repousse pas,
+	// et aucun reglage ne peut en decider autrement.
+	//
+	// Ce qui est retenu ne quitte pas l'appareil du visiteur : rien n'arrive
+	// chez le marchand ni chez nous tant qu'il n'a pas accepte. S'il refuse ou
+	// si le delai passe, ca disparait sans avoir servi.
+	//
+	// La duree n'a pas de defaut qui vaille : c'est une decision de conformite.
+	// Zero desactive la retenue, et c'est l'etat d'une boutique qui n'a rien
+	// decide — elle se comporte exactement comme avant.
+
+	// ---- DFSS_TEST_EXPORT_HOLD_START (pure, eprouvee par tests/test-consent-hold.mjs)
+	/**
+	 * Que faire d'un evenement, sachant l'etat du consentement et l'age de
+	 * l'evenement : 'send', 'hold' ou 'discard'.
+	 *
+	 * @param {boolean|null} state   true accorde, false refuse, null pas de reponse
+	 * @param {number} ageMs         age de l'evenement
+	 * @param {number} holdMs        duree de retenue autorisee (0 = desactivee)
+	 */
+	function dfssHoldDecision(state, ageMs, holdMs) {
+		if (state === true) {
+			return 'send';
+		}
+		// Un refus explicite s'arrete ici, avant toute question de duree.
+		if (state === false) {
+			return 'discard';
+		}
+		if (typeof holdMs !== 'number' || !isFinite(holdMs) || holdMs <= 0) {
+			return 'discard';
+		}
+		if (typeof ageMs !== 'number' || !isFinite(ageMs) || ageMs < 0) {
+			return 'discard';
+		}
+
+		return ageMs <= holdMs ? 'hold' : 'discard';
+	}
+	// ---- DFSS_TEST_EXPORT_HOLD_END
+
+	// ---- survie de l'identifiant de clic avant le consentement ---------------
+	//
+	// Le cookie reste derriere le consentement : il ne bouge pas d'un pouce.
+	// Mais l'identifiant, lui, n'a que la duree de la page d'atterrissage. Un
+	// visiteur qui arrive d'une annonce, navigue, puis accepte la banniere a
+	// deja perdu son gclid — il n'etait que dans l'URL de la premiere page.
+	//
+	// Drexco Medical, 13/09/2026 : 47 achats sur 55 partaient sans identifiant
+	// de clic. Google ne peut rien attribuer sans lui, quoi qu'on lui envoie.
+	// Leur GTM faisait ce travail (Conversion Linker, enableUrlPassthrough) ;
+	// en le retirant on a retire ca aussi, sans le remplacer.
+	//
+	// Propager l'identifiant dans les liens INTERNES n'est pas du stockage :
+	// c'est un parametre d'URL, deja present dans celle par laquelle Google a
+	// envoye le visiteur. Aucun consentement n'est requis pour ne rien ecrire.
+	// Vers un tiers, en revanche, ce serait une fuite — d'ou l'origine stricte.
+
+	// ---- DFSS_TEST_EXPORT_START (fonction pure, eprouvee par tests/test-url-passthrough.mjs)
+	/**
+	 * Rend l'URL a suivre, identifiant de clic ajoute — ou null s'il ne faut
+	 * pas y toucher : lien externe, protocole non navigable, ancre, parametre
+	 * deja present, aucun identifiant a porter, ou href illisible.
+	 */
+	function dfssDecorateUrl(href, ids, origin) {
+		if (!href || typeof href !== 'string') {
+			return null;
+		}
+		if (/^(mailto:|tel:|javascript:|sms:|#)/i.test(href)) {
+			return null;
+		}
+
+		var url;
+		try {
+			url = new URL(href, origin);
+		} catch (e) {
+			return null;
+		}
+		// Jamais vers un tiers : un identifiant de clic transmis ailleurs est
+		// une divulgation, pas une mesure.
+		if (url.origin !== origin) {
+			return null;
+		}
+
+		var carried = false;
+		var keys = ['gclid', 'gbraid', 'wbraid'];
+		for (var i = 0; i < keys.length; i++) {
+			var k = keys[i];
+			var v = ids && ids[k];
+			if (!v || url.searchParams.has(k)) {
+				continue;
+			}
+			url.searchParams.set(k, v);
+			carried = true;
+		}
+
+		return carried ? url.toString() : null;
+	}
+	// ---- DFSS_TEST_EXPORT_END
+
 	function captureClickIds() {
 		var fbclid = getParam('fbclid');
 		if (fbclid) {
@@ -644,6 +847,23 @@
 
 	// Resolve current marketing-consent state across the supported stacks.
 	// Returns true/false; when required and indeterminate, returns false (deny).
+	/**
+	 * L'etat brut du consentement : true accorde, false refuse, null pas de
+	 * reponse lisible. `hasMarketingConsent()` ecrase le troisieme en refus,
+	 * ce qui est le bon defaut pour envoyer ; la retenue, elle, a besoin de la
+	 * difference — on ne garde jamais rien d'un visiteur qui a dit non.
+	 */
+	function marketingConsentState() {
+		if (!CONSENT.required) {
+			return true;
+		}
+		try {
+			return DFSS_CMP.granted(CONSENT);
+		} catch (e) {}
+
+		return null;
+	}
+
 	function hasMarketingConsent() {
 		if (!CONSENT.required) {
 			return true;
@@ -703,9 +923,16 @@
 	}
 
 	function flushPending() {
+		// Un refus efface la file avant toute chose : il ne se garde pas.
+		if (marketingConsentState() === false) {
+			heldClear();
+
+			return;
+		}
 		if (!hasMarketingConsent()) {
 			return;
 		}
+		heldFlush();
 		var queue = pendingOnConsent.slice();
 		pendingOnConsent.length = 0;
 		for (var i = 0; i < queue.length; i++) {
@@ -840,6 +1067,28 @@
 		return true;
 	}
 
+	/**
+	 * Le tag Google Ads. Il ne sert qu'aux deux choses que le serveur ne peut
+	 * pas faire — remarketing et conversions de type page web. Aucune
+	 * conversion d'achat ne part d'ici : celle-la est envoyee par le serveur,
+	 * depuis le hook de commande.
+	 */
+	function injectGoogleAds() {
+		var cfg = PUBLIC.google;
+		if (injected.gads || !cfg || !cfg.conversionId) {
+			return injected.gads;
+		}
+		var id = String(cfg.conversionId);
+		loadScript('https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(id));
+		window.dataLayer = window.dataLayer || [];
+		window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+		window.gtag('js', new Date());
+		window.gtag('config', id);
+		injected.gads = true;
+
+		return true;
+	}
+
 	function injectOaiq() {
 		if (injected.oaiq || !PUBLIC.openai || !PUBLIC.openai.pixelId) {
 			return injected.oaiq;
@@ -869,6 +1118,7 @@
 		injectMeta();
 		injectGa4();
 		injectTikTok();
+		injectGoogleAds();
 		injectOaiq();
 		// Pinterest is intentionally not injected client-side in v2.0 (the
 		// dispatcher handles Pinterest server-side; no light client tag needed).
@@ -1052,14 +1302,95 @@
 		} catch (e) {}
 	}
 
+	/**
+	 * Le remarketing dynamique et les conversions de type page web — les seules
+	 * choses que ce traqueur envoie encore a Google depuis le navigateur, et
+	 * pour une raison chacune : une audience se construit avec le cookie du
+	 * visiteur, et une action de conversion de type page web ne peut pas
+	 * recevoir d'import. Tout le reste passe par le serveur.
+	 */
+	function fireGoogleAds(name, clientData) {
+		var cfg = PUBLIC.google;
+		if (!cfg || !cfg.conversionId || !injectGoogleAds() || typeof window.gtag !== 'function') {
+			return;
+		}
+		try {
+			if (cfg.remarketing) {
+				var rm = dfssRemarketingPayload(cfg.conversionId, name, clientData || {});
+				if (rm) {
+					window.gtag('event', 'page_view', rm);
+				}
+			}
+			var cv = dfssWebConversionPayload(cfg.conversionId, cfg.webConversions, name, clientData || {});
+			if (cv) {
+				window.gtag('event', 'conversion', cv);
+			}
+		} catch (e) {}
+	}
+
 	function fireClient(name, eventId, clientData) {
 		fireMeta(name, eventId, clientData);
 		fireGa4(name, eventId, clientData);
 		fireTikTok(name, eventId, clientData);
 		fireOaiq(name, eventId, clientData);
+		fireGoogleAds(name, clientData);
 	}
 
 	// ---- beacon to our server -----------------------------------------------
+
+	// ---- la file retenue, chez le visiteur ----------------------------------
+
+	var HOLD_KEY = '_dfss_held';
+	var HOLD_MAX = 20;
+
+	/** Duree de retenue, en millisecondes. 0 = desactivee (defaut). */
+	function holdMs() {
+		var m = CONSENT.holdMinutes;
+
+		return (typeof m === 'number' && isFinite(m) && m > 0) ? m * 60000 : 0;
+	}
+
+	function heldRead() {
+		try {
+			var raw = window.sessionStorage.getItem(HOLD_KEY);
+
+			return raw ? (JSON.parse(raw) || []) : [];
+		} catch (e) {
+			return [];
+		}
+	}
+
+	function heldWrite(list) {
+		try {
+			window.sessionStorage.setItem(HOLD_KEY, JSON.stringify(list.slice(-HOLD_MAX)));
+		} catch (e) {}
+	}
+
+	function heldClear() {
+		try { window.sessionStorage.removeItem(HOLD_KEY); } catch (e) {}
+	}
+
+	function heldPush(name, eventId, beaconData) {
+		var list = heldRead();
+		list.push({ n: name, i: eventId, d: beaconData || {}, t: Date.now() });
+		heldWrite(list);
+	}
+
+	function heldFlush() {
+		var state = marketingConsentState();
+		var list = heldRead();
+		heldClear();
+		if (state !== true || !list.length) {
+			return;
+		}
+		var limit = holdMs();
+		for (var i = 0; i < list.length; i++) {
+			var row = list[i];
+			if (dfssHoldDecision(null, Date.now() - row.t, limit) === 'hold') {
+				try { beacon(row.n, row.i, row.d); } catch (e) {}
+			}
+		}
+	}
 
 	function beacon(name, eventId, beaconData) {
 		if (!REST) {
@@ -1145,6 +1476,14 @@
 	// `opts.clientData` shapes the client pixel; `opts.beaconData` the server event.
 	function track(name, opts) {
 		opts = opts || {};
+
+		// Pas encore de reponse a la banniere : on retient l'evenement CHEZ LE
+		// VISITEUR plutot que de le perdre. Rien ne part. S'il accepte,
+		// heldFlush l'envoie ; s'il refuse ou si le delai passe, il disparait.
+		if (!opts.clientOnly && dfssHoldDecision(marketingConsentState(), 0, holdMs()) === 'hold') {
+			heldPush(name, opts.eventId || uuidv4(), opts.beaconData || {});
+		}
+
 		whenConsent(function () {
 			injectAll(); // safe to call repeatedly; injects once
 			var eventId = opts.eventId || uuidv4();
@@ -2116,6 +2455,13 @@
 	// ---- boot ---------------------------------------------------------------
 
 	function boot() {
+		// L'identifiant de clic n'existe que dans l'URL d'atterrissage. On le
+		// lit tout de suite et on le porte de page en page — rien n'est ecrit,
+		// donc rien n'est soumis au consentement. L'ECRITURE du cookie, elle,
+		// reste derriere le consentement : cette limite ne bouge pas.
+		readPendingClickIds();
+		wireClickIdPassthrough();
+
 		// Capture click ids regardless of consent? No — cookies that aid ad
 		// matching are themselves consent-gated. Only after consent.
 		whenConsent(captureClickIds);
