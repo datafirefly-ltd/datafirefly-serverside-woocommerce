@@ -2,9 +2,9 @@
 Contributors: datafirefly
 Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.23.0
+Stable tag: 2.25.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -41,6 +41,18 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.25.1 =
+* Housekeeping, no change to what the plugin does. The readme had stayed on 2.23.0 while the code shipped 2.25.0, so the plugin directory would have served the older version whatever was uploaded; the 2.24.0 and 2.25.0 entries below were missing and are now written. "Tested up to" moves to WordPress 7.1. Three code-standard warnings are silenced with a written reason instead of being left to a reviewer's judgement: wc_clean() is WooCommerce's own sanitiser and the checker does not know it, and the two WPML filters are that plugin's public API, not hooks of ours.
+
+= 2.25.0 =
+* New: the Google click ID now survives navigation. A gclid only ever exists in the URL of the landing page, so a shopper who arrives from an ad, browses a few pages, then accepts the cookie banner has already lost it and the sale can no longer be attributed. The tracker reads it on load and carries it on your own internal links, in the URL only. Nothing is written to the device, so nothing needs consent, and it is never passed to another site. Can be turned off in the settings.
+* New: an optional hold on events until the shopper answers the banner. Someone who has not answered yet is not someone who refused. With a value above zero, their events wait in their own browser for that many minutes: nothing reaches your shop or DataFirefly. If they accept, the events are sent; if they refuse, or the delay passes, the events are discarded. An explicit refusal is never held, whatever the value. Zero by default, because this is a compliance decision and not a technical setting.
+* New: dynamic remarketing and web-page conversion actions are handled by the browser tag, which are the two things a server-side send can never do. An audience is built from the visitor's own cookie, and a conversion action created as a web page type has that type frozen at creation and cannot receive an import.
+* Note: a shop upgrading to this version receives both new settings at their defaults, click ID passthrough on and the hold at zero, with nothing to do.
+
+= 2.24.0 =
+* Fix: shops using tarteaucitron in its native cookie format were never granting consent, and every conversion was dropped in silence. The consent reader only understood the older JSON format and parsed the cookie blindly, which threw on the native `!gtag=true!facebookpixel=false!youtube=wait` form. Both formats are now read.
 
 = 2.23.0 =
 * Privacy: a shopper who refuses consent is now reported as refused instead of not reported at all. Saying nothing read, on the dispatcher, exactly like a shop that never asks, and the sale was forwarded to the advertising platforms all the same. The sale itself is still reported, without any personal data, so the shop keeps its totals; the dispatcher records it and stops it there. Requires a dispatcher running 0.64.0 or later.

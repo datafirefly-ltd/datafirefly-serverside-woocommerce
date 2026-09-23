@@ -381,6 +381,10 @@ class DFSS_Event_Builder
         // WPML. `true` as the fourth argument means "return the original when
         // this object has no translation in that language", which is what we
         // want: a product the merchant never translated is its own group.
+        // PrefixAllGlobals asks a plugin to prefix the hooks it CREATES. These two
+        // are not ours: they are WPML's public API, and calling them is the only
+        // documented way to ask WPML for the original of a translated object.
+        // phpcs:disable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
         if ($canonical === 0 && has_filter('wpml_object_id')) {
             $default = apply_filters('wpml_default_language', null);
             $type = get_post_type($post_id);
@@ -391,6 +395,7 @@ class DFSS_Event_Builder
                 }
             }
         }
+        // phpcs:enable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
 
         if ($canonical === 0 || $canonical === $post_id) {
             $memo[$id] = ''; // nothing to fold

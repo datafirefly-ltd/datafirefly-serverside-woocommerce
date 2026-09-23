@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.25.0
+ * Version:           2.25.1
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.25.0');
+define('DFSS_VERSION', '2.25.1');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -776,7 +776,11 @@ class DFSS_Plugin
             // Rendering the total and the lines from the id alone let anyone
             // walk the ids and read every order of the shop (audit 2026-09-04).
             // Same check as WC_Shortcode_Checkout::order_received().
-            // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            // wc_clean() IS the sanitiser here: it is WooCommerce's own, and applies
+            // sanitize_text_field recursively. PHPCS does not know it, so it reports
+            // an unsanitised read where there is none; hence the second sniff below.
+            // The value is never used for anything but a hash_equals() comparison.
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
             $order_key = isset($_GET['key']) ? wc_clean(wp_unslash($_GET['key'])) : '';
             if ($order instanceof WC_Order && ($order_key === '' || !hash_equals((string) $order->get_order_key(), (string) $order_key))) {
                 $order = null;
