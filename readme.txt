@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.25.1
+Stable tag: 2.25.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -22,6 +22,23 @@ DataFirefly Server-Side delivers complete, reliable WooCommerce conversion track
 * **Secure by design** — no destination credential ever reaches the browser; the HMAC secret never leaves the server; the public beacon endpoint is rate-limited, size-capped and strictly sanitized; purchase events are server-authoritative and cannot be spoofed.
 
 Requires a DataFirefly account (https://datafirefly.com) providing the dispatcher connection key.
+
+= External service =
+
+This plugin sends your shop's tracking events to DataFirefly Server-Side, a service operated by DataFirefly Limited (Ireland). The plugin does nothing until you paste a connection key, and without a key no request ever leaves your site.
+
+What is sent, and when:
+
+* On each tracked visitor action (page view, product view, add to cart, checkout started, payment info added, purchase, form lead): the event name, an event id, the page URL and referrer, the product or order details for commerce events, the visitor's advertising cookies and click identifiers when they exist, and the visitor's IP address and user agent. Personal details of the buyer (email, phone, name, address) are sent for the purchase event only, and only when marketing consent has been granted; DataFirefly hashes them before forwarding them to any advertising platform, the plugin itself sends them as they are, over TLS. When consent is refused or unknown, the purchase is reported without any personal data at all.
+* Once a night: the number of orders and their total for the previous day, so the service can tell you what it received against what your shop actually sold.
+* When you open the settings screen: a request for the public identifiers of your enabled destinations (pixel ids and measurement ids), so the plugin can fire the matching browser tags.
+
+Every request is signed with a secret that stays on your server and is never exposed to the browser. The endpoint is https://serverside.datafirefly.com.
+
+DataFirefly then forwards the events, on your behalf and according to what you enabled in your DataFirefly account, to the advertising and analytics platforms you configured there: Meta, Google Analytics 4, Google Ads, TikTok, Pinterest, Microsoft Advertising and OpenAI.
+
+* Terms of service: https://server-side.datafirefly.com/en/terms.html
+* Privacy policy: https://server-side.datafirefly.com/en/privacy.html
 
 == Installation ==
 
@@ -41,6 +58,9 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.25.2 =
+* Housekeeping, no change to what the plugin does. The development test benches, the developer README and the .gitignore no longer travel inside the archive: they are repository files, not plugin files. The readme now states plainly which service the plugin talks to, what it sends and when, with links to the terms and the privacy policy.
 
 = 2.25.1 =
 * Housekeeping, no change to what the plugin does. The readme had stayed on 2.23.0 while the code shipped 2.25.0, so the plugin directory would have served the older version whatever was uploaded; the 2.24.0 and 2.25.0 entries below were missing and are now written. "Tested up to" moves to WordPress 7.1. Three code-standard warnings are silenced with a written reason instead of being left to a reviewer's judgement: wc_clean() is WooCommerce's own sanitiser and the checker does not know it, and the two WPML filters are that plugin's public API, not hooks of ours.
