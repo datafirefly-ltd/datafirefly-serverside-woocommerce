@@ -58,6 +58,9 @@ class DFSS_Plugin
         // Capture browser cookies at checkout (browser context) onto the order,
         // so the purchase hook can use them even when it fires from a gateway.
         add_action('woocommerce_checkout_create_order', array($this, 'capture_cookies'), 10, 2);
+        // The block checkout (Store API), WooCommerce's default since 8.3, never
+        // fires the hook above.
+        add_action('woocommerce_store_api_checkout_update_order_from_request', array($this, 'capture_cookies_store_api'), 10, 2);
         // Send the purchase once payment is in. Idempotent across all triggers.
         add_action('woocommerce_payment_complete', array($this, 'on_purchase'));
         add_action('woocommerce_order_status_processing', array($this, 'on_purchase'));
@@ -341,6 +344,27 @@ class DFSS_Plugin
                 }
             }
         }
+    }
+
+    /**
+     * The same capture for the block checkout (Store API). The classic hook
+     * never fires there, so a blocks order carried no consent verdict, no click
+     * id and no GA4 session: the server purchase then fell back to the request
+     * or to 'denied', and in Google Consent Mode advanced the thank-you page
+     * had no verdict to act on (review of 29/09/2026). The Store API hands us
+     * the order before its final save; we save it anyway, so the meta cannot
+     * depend on what WooCommerce does next.
+     *
+     * @param WC_Order $order
+     * @param mixed    $request WP_REST_Request, unused.
+     */
+    public function capture_cookies_store_api($order, $request = null)
+    {
+        if (!$order instanceof WC_Order) {
+            return;
+        }
+        $this->capture_cookies($order, array());
+        $order->save();
     }
 
     /**
