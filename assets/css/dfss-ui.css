@@ -317,34 +317,74 @@
   color: var(--dfss-ink-2);
   margin-top: var(--dfss-space-1);
 }
-.dfss-ui .dfss-choice__opt.is-selected,
+.dfss-ui .dfss-choice__opt.is-selected {
+  border: 2px solid var(--dfss-action);
+  background: var(--dfss-select-bg);
+  padding: calc(var(--dfss-space-3) - 1px);
+}
 .dfss-ui .dfss-choice__opt:has(input:checked) {
   border: 2px solid var(--dfss-action);
   background: var(--dfss-select-bg);
   padding: calc(var(--dfss-space-3) - 1px);
 }
+.dfss-ui .dfss-choice__opt:has(input:focus-visible) {
+  outline: 2px solid var(--dfss-focus);
+  outline-offset: 2px;
+}
 
-/* 6. Bouton segmente */
+/* 6. Bouton segmente
+ * Balisage : un groupe de <button aria-pressed="true|false"> contenant chacun
+ * <svg class="dfss-icon"><use href="#dfss-check"/></svg> puis le libelle.
+ * L'option choisie montre la coche : l'etat ne repose jamais sur la couleur
+ * seule. Pas d'overflow:hidden, sinon le contour de focus est coupe. */
 .dfss-ui .dfss-segmented {
   display: inline-flex;
   border: 1px solid var(--dfss-control-line);
   border-radius: var(--dfss-radius-pill);
-  overflow: hidden;
 }
 .dfss-ui .dfss-segmented__opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dfss-space-1);
   padding: 5px 14px;
   white-space: nowrap;
+  font: inherit;
   font-size: var(--dfss-text-help);
   color: var(--dfss-ink);
   background: var(--dfss-surface);
   border: 0;
   cursor: pointer;
 }
+.dfss-ui .dfss-segmented__opt:first-child {
+  border-radius: var(--dfss-radius-pill) 0 0 var(--dfss-radius-pill);
+}
+.dfss-ui .dfss-segmented__opt:last-child {
+  border-radius: 0 var(--dfss-radius-pill) var(--dfss-radius-pill) 0;
+}
 .dfss-ui .dfss-segmented__opt + .dfss-segmented__opt {
   border-left: 1px solid var(--dfss-control-line);
 }
-.dfss-ui .dfss-segmented__opt.is-selected,
-.dfss-ui .dfss-segmented__opt:has(input:checked) {
+.dfss-ui .dfss-segmented__opt:focus-visible {
+  outline-offset: -4px;
+}
+.dfss-ui .dfss-segmented__opt .dfss-icon {
+  display: none;
+  width: 16px;
+  height: 16px;
+  vertical-align: 0;
+}
+.dfss-ui .dfss-segmented__opt[aria-pressed="true"] .dfss-icon {
+  display: inline-block;
+}
+.dfss-ui .dfss-segmented__opt.is-selected .dfss-icon {
+  display: inline-block;
+}
+.dfss-ui .dfss-segmented__opt[aria-pressed="true"] {
+  background: var(--dfss-select-segment-bg);
+  color: var(--dfss-select-segment-ink);
+  font-weight: 600;
+}
+.dfss-ui .dfss-segmented__opt.is-selected {
   background: var(--dfss-select-segment-bg);
   color: var(--dfss-select-segment-ink);
   font-weight: 600;
