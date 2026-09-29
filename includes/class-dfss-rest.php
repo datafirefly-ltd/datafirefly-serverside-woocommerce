@@ -316,7 +316,23 @@ class DFSS_REST
             'page_referrer' => $page_referrer,
             'user_data' => $user_data,
             'event_data' => $event_data,
+            'browser_sent' => $this->sanitize_browser_sent($body),
         );
+    }
+
+    /**
+     * Destinations the storefront tag already served (Consent Mode advanced).
+     * Closed list: anything else is dropped, never forwarded.
+     *
+     * @param array $body
+     *
+     * @return string[]
+     */
+    private function sanitize_browser_sent(array $body)
+    {
+        $in = isset($body['browser_sent']) && is_array($body['browser_sent']) ? $body['browser_sent'] : array();
+
+        return array_values(array_intersect(array('ga4'), array_map('strval', $in)));
     }
 
     /**

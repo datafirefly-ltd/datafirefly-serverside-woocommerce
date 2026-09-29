@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.25.3
+ * Version:           2.26.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.25.3');
+define('DFSS_VERSION', '2.26.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -203,6 +203,13 @@ class DFSS_Plugin
                 // conformite et non un reglage technique.
                 'clickid_passthrough' => 1,
                 'consent_hold_minutes' => 0,
+                // Nouveaux en 2.26.0 : le mode avance Google Consent Mode.
+                // Eteint par defaut. Une boutique qui monte de version garde
+                // exactement son comportement : c'est une decision de
+                // conformite, pas un reglage technique.
+                'google_consent_mode' => 'basic',
+                'consent_default_region' => 'all',
+                'ads_data_redaction' => 1,
             )
         );
     }
@@ -830,6 +837,11 @@ class DFSS_Plugin
                     'currency' => $order->get_currency(),
                     'numItems' => $num_items,
                     'products' => $products,
+                    // Le verdict ENREGISTRE sur la commande au checkout, celui
+                    // qui a decide de l'envoi serveur. En mode avance, le
+                    // traqueur s'en sert pour savoir s'il doit envoyer l'achat a
+                    // GA4 lui-meme : seulement si le serveur ne l'a pas fait.
+                    'consent' => (string) $order->get_meta('_dfss_consent'),
                 );
             }
         }
@@ -1035,6 +1047,9 @@ class DFSS_Plugin
             // Borne a 24 h : au-dela, un evenement retenu n'a plus de rapport
             // avec la visite qui l'a produit.
             $o['consent_hold_minutes'] = max(0, min(1440, isset($_POST['dfss_consent_hold_minutes']) ? (int) $_POST['dfss_consent_hold_minutes'] : 0));
+            $o['google_consent_mode'] = (isset($_POST['dfss_google_consent_mode']) && $_POST['dfss_google_consent_mode'] === 'advanced') ? 'advanced' : 'basic';
+            $o['consent_default_region'] = (isset($_POST['dfss_consent_default_region']) && $_POST['dfss_consent_default_region'] === 'eea') ? 'eea' : 'all';
+            $o['ads_data_redaction'] = isset($_POST['dfss_ads_data_redaction']) ? 1 : 0;
             update_option(self::OPTION, $o);
             add_settings_error('dfss', 'toggles', __('Tracking settings saved.', 'datafirefly-serverside'), 'updated');
 
@@ -1097,6 +1112,9 @@ class DFSS_Plugin
                 'dest_tiktok' => isset($_POST['dfss_dest_tiktok']) ? 1 : 0,
                 'clickid_passthrough' => isset($_POST['dfss_clickid_passthrough']) ? 1 : 0,
                 'consent_hold_minutes' => max(0, min(1440, isset($_POST['dfss_consent_hold_minutes']) ? (int) $_POST['dfss_consent_hold_minutes'] : 0)),
+                'google_consent_mode' => (isset($_POST['dfss_google_consent_mode']) && $_POST['dfss_google_consent_mode'] === 'advanced') ? 'advanced' : 'basic',
+                'consent_default_region' => (isset($_POST['dfss_consent_default_region']) && $_POST['dfss_consent_default_region'] === 'eea') ? 'eea' : 'all',
+                'ads_data_redaction' => isset($_POST['dfss_ads_data_redaction']) ? 1 : 0,
             );
             update_option(self::OPTION, $opts);
             if (!empty($opts['enabled']) && $opts['tenant_id'] !== '' && $opts['hmac_secret'] !== '') {
@@ -1347,6 +1365,27 @@ class DFSS_Plugin
                                 <td>
                                     <input type="number" min="0" max="1440" step="1" name="dfss_consent_hold_minutes" value="<?php echo esc_attr((string) ($o['consent_hold_minutes'] ?? 0)); ?>" class="small-text" />
                                     <p class="description"><?php esc_html_e('A shopper who has not yet answered the banner is not a shopper who refused. With a value above zero, their events wait IN THEIR OWN BROWSER for that many minutes: nothing reaches your shop or DataFirefly. If they accept, the events are sent. If they refuse, or the delay passes, they are discarded. An explicit refusal is never held, whatever the value. Zero disables it, and zero is the default: this is a compliance decision, not a technical setting. Ask your data protection officer.', 'datafirefly-serverside'); ?></p>
+                                </td></tr>
+                            <tr><th scope="row"><?php esc_html_e('Google consent mode', 'datafirefly-serverside'); ?></th>
+                                <td>
+                                    <select name="dfss_google_consent_mode">
+                                        <option value="basic" <?php selected('basic', (string) ($o['google_consent_mode'] ?? 'basic')); ?>><?php esc_html_e('Basic (nothing loads before consent)', 'datafirefly-serverside'); ?></option>
+                                        <option value="advanced" <?php selected('advanced', (string) ($o['google_consent_mode'] ?? 'basic')); ?>><?php esc_html_e('Advanced (Google tags load cookieless before consent)', 'datafirefly-serverside'); ?></option>
+                                    </select>
+                                    <p class="description"><?php esc_html_e('Basic is the default: no tag of any kind loads until the visitor accepts. Advanced loads the Google tags (GA4, Google Ads) as soon as the page opens, with consent denied: until the visitor accepts, they send cookieless pings (time, browser, referring page, consent state; the IP address is truncated) that Google uses to model the conversions and visits it cannot see. Meta, TikTok and every other platform still wait for consent. This is a compliance decision, not a technical setting: ask your data protection officer.', 'datafirefly-serverside'); ?></p>
+                                </td></tr>
+                            <tr><th scope="row"><?php esc_html_e('Where consent is denied by default', 'datafirefly-serverside'); ?></th>
+                                <td>
+                                    <select name="dfss_consent_default_region">
+                                        <option value="all" <?php selected('all', (string) ($o['consent_default_region'] ?? 'all')); ?>><?php esc_html_e('Everywhere', 'datafirefly-serverside'); ?></option>
+                                        <option value="eea" <?php selected('eea', (string) ($o['consent_default_region'] ?? 'all')); ?>><?php esc_html_e('EEA, United Kingdom and Switzerland only', 'datafirefly-serverside'); ?></option>
+                                    </select>
+                                    <p class="description"><?php esc_html_e('Advanced mode only. With the second choice, visitors outside these countries are treated as consenting by the Google tags until they answer.', 'datafirefly-serverside'); ?></p>
+                                </td></tr>
+                            <tr><th scope="row"><?php esc_html_e('Hide the ad click ID while ads consent is denied', 'datafirefly-serverside'); ?></th>
+                                <td>
+                                    <label><input type="checkbox" name="dfss_ads_data_redaction" value="1" <?php checked(1, (int) ($o['ads_data_redaction'] ?? 1)); ?> /> <?php esc_html_e('Enabled', 'datafirefly-serverside'); ?></label>
+                                    <p class="description"><?php esc_html_e('Advanced mode only. Removes the Google click ID from the cookieless pings until the visitor accepts advertising. The most privacy-protective choice; Google says it can reduce modelling accuracy.', 'datafirefly-serverside'); ?></p>
                                 </td></tr>
                         </table>
                         <p><button type="submit" name="dfss_save" class="button"><?php esc_html_e('Save', 'datafirefly-serverside'); ?></button></p>

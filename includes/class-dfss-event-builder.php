@@ -135,6 +135,12 @@ class DFSS_Event_Builder
             $payload['pageReferrer'] = $page_referrer;
         }
 
+        // Consent Mode advanced: the GA4 tag already sent this event, the
+        // dispatcher must not send it again by Measurement Protocol.
+        if (!empty($beacon['browser_sent']) && is_array($beacon['browser_sent'])) {
+            $payload['browserSent'] = array_values($beacon['browser_sent']);
+        }
+
         $event_data = self::beacon_event_data(
             isset($beacon['event_data']) && is_array($beacon['event_data']) ? $beacon['event_data'] : array()
         );

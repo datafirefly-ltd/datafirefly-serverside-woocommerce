@@ -208,7 +208,7 @@ class DFSS_Consent
      *
      * @param array $opts Plugin options.
      *
-     * @return array{required:bool,cmp:string,hasWpConsentApi:bool}
+     * @return array{required:bool,cmp:string,hasWpConsentApi:bool,holdMinutes:int,clickIdPassthrough:bool,googleMode:string,consentRegion:string,adsDataRedaction:bool}
      */
     public static function js_config($opts)
     {
@@ -221,6 +221,12 @@ class DFSS_Consent
             // propagation active, retenue eteinte.
             'holdMinutes' => max(0, min(1440, isset($opts['consent_hold_minutes']) ? (int) $opts['consent_hold_minutes'] : 0)),
             'clickIdPassthrough' => !isset($opts['clickid_passthrough']) || (int) $opts['clickid_passthrough'] !== 0,
+            // Mode avance Google Consent Mode : trois decisions du marchand.
+            // Une cle jamais ecrite vaut son defaut : mode de base, refus
+            // partout, identifiant de clic masque.
+            'googleMode' => (isset($opts['google_consent_mode']) && $opts['google_consent_mode'] === 'advanced') ? 'advanced' : 'basic',
+            'consentRegion' => (isset($opts['consent_default_region']) && $opts['consent_default_region'] === 'eea') ? 'eea' : 'all',
+            'adsDataRedaction' => !isset($opts['ads_data_redaction']) || (int) $opts['ads_data_redaction'] !== 0,
         );
     }
 

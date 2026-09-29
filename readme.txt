@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.25.3
+Stable tag: 2.26.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -58,6 +58,9 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.26.0 =
+* New: optional Google Consent Mode "advanced" (off by default). Google tags load cookieless before consent; Meta, TikTok and every other platform still wait for it. No purchase is ever sent to GA4 twice.
 
 = 2.25.3 =
 * Fix: since 2.25.0 the storefront tracker stopped on page load (two click-ID functions were missing), so no browser event was sent: no page view, no pixel, no add-to-cart. Purchases sent by the server were not affected.
