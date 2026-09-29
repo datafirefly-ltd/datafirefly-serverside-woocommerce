@@ -199,6 +199,7 @@
 }
 .dfss-ui .dfss-banner__action {
   margin-left: auto;
+  white-space: nowrap;
   font-weight: 600;
   color: inherit;
   text-decoration: underline;
@@ -277,6 +278,7 @@
 }
 .dfss-ui .dfss-card__foot {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--dfss-space-2);
   margin-top: var(--dfss-space-4);
@@ -331,6 +333,7 @@
 }
 .dfss-ui .dfss-segmented__opt {
   padding: 5px 14px;
+  white-space: nowrap;
   font-size: var(--dfss-text-help);
   color: var(--dfss-ink);
   background: var(--dfss-surface);
@@ -350,6 +353,7 @@
 /* 7. Ligne de reglage */
 .dfss-ui .dfss-setting {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--dfss-space-4);
@@ -406,6 +410,7 @@
 /* 11. Boutons (console ; dans les plugins, boutons natifs) */
 .dfss-ui .dfss-btn {
   display: inline-flex;
+  white-space: nowrap;
   align-items: center;
   gap: var(--dfss-space-2);
   border-radius: var(--dfss-radius-pill);
