@@ -56,7 +56,7 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  .dfss-ui:not([data-dfss-theme="light"]) {
+  .dfss-ui[data-dfss-theme="auto"] {
     --dfss-page: #131314;
     --dfss-surface: #1E1F20;
     --dfss-line: #444746;
