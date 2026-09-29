@@ -60,7 +60,9 @@ Yes. When "Require consent" is on (default), no tag is injected and no event is 
 == Changelog ==
 
 = 2.26.0 =
-* New: optional Google Consent Mode "advanced" (off by default). Google tags load cookieless before consent; Meta, TikTok and every other platform still wait for it. No purchase is ever sent to GA4 twice.
+* New: optional Google Consent Mode "advanced" (off by default). Before consent, only the Google tags load, cookieless, for Google's modelling; Meta, TikTok and every other platform still wait for consent. Once the visitor accepts, measurement goes through the server as before, so ad blockers do not take it away. A purchase is sent to GA4 by the browser only when the server did not send it.
+* Fix: on a connected shop, "Save settings" switched the click-ID passthrough off and reset the hold to zero, because the form did not show those fields. The connected screen now shows all consent settings, and a form only changes what it shows.
+* Fix: orders placed through the block checkout (WooCommerce's default since 8.3) now keep the consent verdict, the ad click IDs and the GA4 session, as classic checkout orders always did.
 
 = 2.25.3 =
 * Fix: since 2.25.0 the storefront tracker stopped on page load (two click-ID functions were missing), so no browser event was sent: no page view, no pixel, no add-to-cart. Purchases sent by the server were not affected.
