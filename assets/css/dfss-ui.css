@@ -1,0 +1,442 @@
+/*
+ * dfss-ui.css : fondations du design Server-Side (v1.0.0).
+ * Source unique : datafirefly-server-side/shared/design/. Recopiee dans la
+ * console et les trois plugins par scripts/sync-design.py. Ne pas editer les
+ * copies. Tout vit sous .dfss-ui : rien ne deborde sur l'ecran d'accueil.
+ * Couleurs : uniquement par variables (tokens.json), jamais en dur.
+ */
+
+/* ---- DFSS-TOKENS:BEGIN (genere depuis tokens.json, ne pas editer) ---- */
+.dfss-ui {
+  --dfss-radius-chip: 8px;
+  --dfss-radius-banner: 12px;
+  --dfss-radius-card: 16px;
+  --dfss-radius-pill: 999px;
+  --dfss-space-1: 4px;
+  --dfss-space-2: 8px;
+  --dfss-space-3: 12px;
+  --dfss-space-4: 16px;
+  --dfss-space-5: 20px;
+  --dfss-space-6: 24px;
+  --dfss-space-7: 32px;
+  --dfss-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --dfss-text-title: 16px;
+  --dfss-text-body: 14px;
+  --dfss-text-help: 12.5px;
+  --dfss-text-min: 12px;
+  --dfss-page: #F8F9FA;
+  --dfss-surface: #FFFFFF;
+  --dfss-line: #DADCE0;
+  --dfss-control-line: #747775;
+  --dfss-ink: #202124;
+  --dfss-ink-2: #5F6368;
+  --dfss-action: #0B57D0;
+  --dfss-on-action: #FFFFFF;
+  --dfss-action-text: #0B57D0;
+  --dfss-link: #1A73E8;
+  --dfss-select-bg: #F0F4FF;
+  --dfss-select-segment-bg: #D3E3FD;
+  --dfss-select-segment-ink: #041E49;
+  --dfss-ok-ink: #137333;
+  --dfss-ok-banner-ink: #0D5227;
+  --dfss-ok-bg: #E6F4EA;
+  --dfss-warn-ink: #8A4A00;
+  --dfss-warn-bg: #FEF7E0;
+  --dfss-err-ink: #C5221F;
+  --dfss-err-banner-ink: #A50E0E;
+  --dfss-err-bg: #FCE8E6;
+  --dfss-info-ink: #0842A0;
+  --dfss-info-bg: #E8F0FE;
+  --dfss-neutral-ink: #5F6368;
+  --dfss-neutral-bg: #F1F3F4;
+  --dfss-brand: #008D9E;
+  --dfss-on-brand: #FFFFFF;
+  --dfss-skeleton: #E8EAED;
+  --dfss-focus: #0B57D0;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  .dfss-ui:not([data-dfss-theme="light"]) {
+    --dfss-page: #131314;
+    --dfss-surface: #1E1F20;
+    --dfss-line: #444746;
+    --dfss-control-line: #8E918F;
+    --dfss-ink: #E3E3E3;
+    --dfss-ink-2: #C4C7C5;
+    --dfss-action: #A8C7FA;
+    --dfss-on-action: #062E6F;
+    --dfss-action-text: #A8C7FA;
+    --dfss-link: #A8C7FA;
+    --dfss-select-bg: #1B2A45;
+    --dfss-select-segment-bg: #1B3A6B;
+    --dfss-select-segment-ink: #D3E3FD;
+    --dfss-ok-ink: #6DD58C;
+    --dfss-ok-banner-ink: #6DD58C;
+    --dfss-ok-bg: #0F3D1F;
+    --dfss-warn-ink: #FDD663;
+    --dfss-warn-bg: #3F2E00;
+    --dfss-err-ink: #F2B8B5;
+    --dfss-err-banner-ink: #F2B8B5;
+    --dfss-err-bg: #4A1414;
+    --dfss-info-ink: #D3E3FD;
+    --dfss-info-bg: #0B2A55;
+    --dfss-neutral-ink: #C4C7C5;
+    --dfss-neutral-bg: #2D2F31;
+    --dfss-brand: #008D9E;
+    --dfss-on-brand: #FFFFFF;
+    --dfss-skeleton: #2D2F31;
+    --dfss-focus: #A8C7FA;
+    color-scheme: dark;
+  }
+}
+.dfss-ui[data-dfss-theme="dark"] {
+  --dfss-page: #131314;
+  --dfss-surface: #1E1F20;
+  --dfss-line: #444746;
+  --dfss-control-line: #8E918F;
+  --dfss-ink: #E3E3E3;
+  --dfss-ink-2: #C4C7C5;
+  --dfss-action: #A8C7FA;
+  --dfss-on-action: #062E6F;
+  --dfss-action-text: #A8C7FA;
+  --dfss-link: #A8C7FA;
+  --dfss-select-bg: #1B2A45;
+  --dfss-select-segment-bg: #1B3A6B;
+  --dfss-select-segment-ink: #D3E3FD;
+  --dfss-ok-ink: #6DD58C;
+  --dfss-ok-banner-ink: #6DD58C;
+  --dfss-ok-bg: #0F3D1F;
+  --dfss-warn-ink: #FDD663;
+  --dfss-warn-bg: #3F2E00;
+  --dfss-err-ink: #F2B8B5;
+  --dfss-err-banner-ink: #F2B8B5;
+  --dfss-err-bg: #4A1414;
+  --dfss-info-ink: #D3E3FD;
+  --dfss-info-bg: #0B2A55;
+  --dfss-neutral-ink: #C4C7C5;
+  --dfss-neutral-bg: #2D2F31;
+  --dfss-brand: #008D9E;
+  --dfss-on-brand: #FFFFFF;
+  --dfss-skeleton: #2D2F31;
+  --dfss-focus: #A8C7FA;
+  color-scheme: dark;
+}
+/* ---- DFSS-TOKENS:END ---- */
+
+/* Racine */
+.dfss-ui {
+  font-family: var(--dfss-font);
+  font-size: var(--dfss-text-body);
+  line-height: 1.45;
+  color: var(--dfss-ink);
+}
+.dfss-ui *,
+.dfss-ui *::before,
+.dfss-ui *::after {
+  box-sizing: border-box;
+}
+.dfss-ui :focus-visible {
+  outline: 2px solid var(--dfss-focus);
+  outline-offset: 2px;
+}
+
+/* Icone (sprite dfss-icons.svg) */
+.dfss-ui .dfss-icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+  vertical-align: -4px;
+}
+
+/* 1. En-tete de marque */
+.dfss-ui .dfss-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--dfss-space-3);
+  background: var(--dfss-surface);
+  border: 1px solid var(--dfss-line);
+  border-radius: var(--dfss-radius-card);
+  padding: var(--dfss-space-3) var(--dfss-space-4);
+}
+.dfss-ui .dfss-brand__mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--dfss-brand);
+  color: var(--dfss-on-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+.dfss-ui .dfss-brand__name {
+  font-weight: 600;
+}
+.dfss-ui .dfss-brand__meta {
+  font-size: var(--dfss-text-min);
+  color: var(--dfss-ink-2);
+}
+.dfss-ui .dfss-brand__status {
+  margin-left: auto;
+}
+
+/* 2. Bandeau d'etat : icone + titre + detail (+ action) */
+.dfss-ui .dfss-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--dfss-space-3);
+  border-radius: var(--dfss-radius-banner);
+  padding: var(--dfss-space-3) var(--dfss-space-3);
+  margin: 0 0 var(--dfss-space-2);
+}
+.dfss-ui .dfss-banner__title {
+  font-weight: 600;
+}
+.dfss-ui .dfss-banner__action {
+  margin-left: auto;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+}
+.dfss-ui .dfss-banner--ok {
+  background: var(--dfss-ok-bg);
+  color: var(--dfss-ok-banner-ink);
+}
+.dfss-ui .dfss-banner--warn {
+  background: var(--dfss-warn-bg);
+  color: var(--dfss-warn-ink);
+}
+.dfss-ui .dfss-banner--err {
+  background: var(--dfss-err-bg);
+  color: var(--dfss-err-banner-ink);
+}
+.dfss-ui .dfss-banner--info {
+  background: var(--dfss-info-bg);
+  color: var(--dfss-info-ink);
+}
+
+/* 3. Puce d'etat : icone + libelle */
+.dfss-ui .dfss-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dfss-space-1);
+  border-radius: var(--dfss-radius-chip);
+  padding: 3px 9px;
+  font-size: var(--dfss-text-min);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dfss-ui .dfss-chip .dfss-icon {
+  width: 14px;
+  height: 14px;
+  vertical-align: 0;
+}
+.dfss-ui .dfss-chip--ok {
+  background: var(--dfss-ok-bg);
+  color: var(--dfss-ok-ink);
+}
+.dfss-ui .dfss-chip--warn {
+  background: var(--dfss-warn-bg);
+  color: var(--dfss-warn-ink);
+}
+.dfss-ui .dfss-chip--err {
+  background: var(--dfss-err-bg);
+  color: var(--dfss-err-ink);
+}
+.dfss-ui .dfss-chip--info {
+  background: var(--dfss-info-bg);
+  color: var(--dfss-info-ink);
+}
+.dfss-ui .dfss-chip--neutral {
+  background: var(--dfss-neutral-bg);
+  color: var(--dfss-neutral-ink);
+}
+
+/* 4. Carte de section */
+.dfss-ui .dfss-card {
+  background: var(--dfss-surface);
+  border: 1px solid var(--dfss-line);
+  border-radius: var(--dfss-radius-card);
+  padding: var(--dfss-space-4) var(--dfss-space-5);
+  margin: 0 0 var(--dfss-space-4);
+}
+.dfss-ui .dfss-card__title {
+  font-size: var(--dfss-text-title);
+  font-weight: 600;
+  margin: 0;
+}
+.dfss-ui .dfss-card__help {
+  font-size: var(--dfss-text-help);
+  color: var(--dfss-ink-2);
+  margin: var(--dfss-space-1) 0 var(--dfss-space-3);
+}
+.dfss-ui .dfss-card__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--dfss-space-2);
+  margin-top: var(--dfss-space-4);
+}
+
+/* Lien « En savoir plus » : souligne, jamais la couleur seule */
+.dfss-ui .dfss-link {
+  color: var(--dfss-link);
+  text-decoration: underline;
+}
+
+/* 5. Choix en cartes */
+.dfss-ui .dfss-choice {
+  display: flex;
+  gap: var(--dfss-space-3);
+  flex-wrap: wrap;
+  margin: 0 0 var(--dfss-space-3);
+}
+.dfss-ui .dfss-choice__opt {
+  flex: 1 1 200px;
+  border: 1px solid var(--dfss-line);
+  border-radius: var(--dfss-radius-banner);
+  padding: var(--dfss-space-3);
+  background: var(--dfss-surface);
+  cursor: pointer;
+}
+.dfss-ui .dfss-choice__opt input {
+  margin-right: var(--dfss-space-2);
+}
+.dfss-ui .dfss-choice__title {
+  font-weight: 600;
+}
+.dfss-ui .dfss-choice__help {
+  display: block;
+  font-size: var(--dfss-text-help);
+  color: var(--dfss-ink-2);
+  margin-top: var(--dfss-space-1);
+}
+.dfss-ui .dfss-choice__opt.is-selected,
+.dfss-ui .dfss-choice__opt:has(input:checked) {
+  border: 2px solid var(--dfss-action);
+  background: var(--dfss-select-bg);
+  padding: calc(var(--dfss-space-3) - 1px);
+}
+
+/* 6. Bouton segmente */
+.dfss-ui .dfss-segmented {
+  display: inline-flex;
+  border: 1px solid var(--dfss-control-line);
+  border-radius: var(--dfss-radius-pill);
+  overflow: hidden;
+}
+.dfss-ui .dfss-segmented__opt {
+  padding: 5px 14px;
+  font-size: var(--dfss-text-help);
+  color: var(--dfss-ink);
+  background: var(--dfss-surface);
+  border: 0;
+  cursor: pointer;
+}
+.dfss-ui .dfss-segmented__opt + .dfss-segmented__opt {
+  border-left: 1px solid var(--dfss-control-line);
+}
+.dfss-ui .dfss-segmented__opt.is-selected,
+.dfss-ui .dfss-segmented__opt:has(input:checked) {
+  background: var(--dfss-select-segment-bg);
+  color: var(--dfss-select-segment-ink);
+  font-weight: 600;
+}
+
+/* 7. Ligne de reglage */
+.dfss-ui .dfss-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dfss-space-4);
+  padding: var(--dfss-space-3) 0;
+  border-top: 1px solid var(--dfss-line);
+}
+.dfss-ui .dfss-setting__label {
+  font-size: var(--dfss-text-body);
+}
+.dfss-ui .dfss-setting__help {
+  font-size: var(--dfss-text-min);
+  color: var(--dfss-ink-2);
+}
+
+/* 8. Tableau d'activite */
+.dfss-ui .dfss-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--dfss-text-help);
+  font-variant-numeric: tabular-nums;
+}
+.dfss-ui .dfss-table th,
+.dfss-ui .dfss-table td {
+  text-align: left;
+  padding: var(--dfss-space-2) var(--dfss-space-2);
+  border-bottom: 1px solid var(--dfss-line);
+}
+.dfss-ui .dfss-table th {
+  color: var(--dfss-ink-2);
+  font-weight: 600;
+}
+
+/* 9. Etat vide */
+.dfss-ui .dfss-empty {
+  text-align: center;
+  padding: var(--dfss-space-6) var(--dfss-space-4);
+  color: var(--dfss-ink-2);
+}
+.dfss-ui .dfss-empty__title {
+  color: var(--dfss-ink);
+  font-weight: 600;
+  margin: var(--dfss-space-1) 0;
+}
+
+/* 10. Chargement */
+.dfss-ui .dfss-skeleton {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--dfss-skeleton);
+  margin: var(--dfss-space-2) 0;
+}
+
+/* 11. Boutons (console ; dans les plugins, boutons natifs) */
+.dfss-ui .dfss-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dfss-space-2);
+  border-radius: var(--dfss-radius-pill);
+  padding: 8px 20px;
+  font: inherit;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+}
+.dfss-ui .dfss-btn--primary {
+  background: var(--dfss-action);
+  color: var(--dfss-on-action);
+}
+.dfss-ui .dfss-btn--secondary {
+  background: transparent;
+  color: var(--dfss-action-text);
+  border-color: var(--dfss-control-line);
+}
+.dfss-ui .dfss-btn--text {
+  background: transparent;
+  color: var(--dfss-action-text);
+}
+.dfss-ui .dfss-btn--danger {
+  background: var(--dfss-err-bg);
+  color: var(--dfss-err-banner-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dfss-ui * {
+    transition: none;
+    animation: none;
+  }
+}
