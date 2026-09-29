@@ -1066,6 +1066,206 @@
 		return { granted: granted, analytics: analytics, bind: bind };
 	})();
 	// ---- DFSS-CONSENT-CORE:END ---------------------------------------------
+	// ---- DFSS-CONSENT-MODE:BEGIN (genere — ne pas editer ici) --------------
+	/**
+	 * Google Consent Mode, variante AVANCEE, partagee mot pour mot par les trois
+	 * traqueurs (WooCommerce, PrestaShop, Shopware).
+	 *
+	 * Mode avance : les balises Google (GA4, Google Ads) se chargent des
+	 * l'arrivee du visiteur, en refus par defaut, et envoient des pings sans
+	 * cookies tant qu'il n'a pas accepte. Google s'en sert pour modeliser ce
+	 * qu'il ne voit pas. RIEN D'AUTRE ne change : Meta, TikTok, OpenAI et le
+	 * dispatcher restent derriere le consentement marketing.
+	 *
+	 * Option du marchand, eteinte par defaut. C'est une decision de conformite :
+	 * un ping sans cookies contient l'heure, le user-agent, la page d'origine et
+	 * l'etat du consentement. Spec : SPEC-MODE-AVANCE-CONSENTEMENT-2026-09-29.
+	 *
+	 * La regle qui empeche le double comptage GA4 vit ici et nulle part ailleurs :
+	 *   navigation  -> la balise GA4, et l'envoi au dispatcher porte browser_sent
+	 *                  pour qu'il ne la renvoie pas par Measurement Protocol ;
+	 *   achat       -> la balise GA4 SEULEMENT si la commande a ete refusee
+	 *                  (le serveur n'envoie rien dans ce cas), sinon le serveur seul.
+	 *
+	 * Genere dans les trois traqueurs par scripts/sync-consent-core.py.
+	 * Ne pas editer les copies.
+	 */
+	var DFSS_CM = (function () {
+		'use strict';
+
+		// EEE (UE 27 + Islande, Liechtenstein, Norvege), Royaume-Uni, Suisse.
+		var EEA_UK_CH = [
+			'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
+			'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
+			'SI', 'ES', 'SE', 'IS', 'LI', 'NO', 'GB', 'CH'
+		];
+
+		/** Actif seulement si le marchand l'a choisi ET qu'une balise Google existe. */
+		function isAdvanced(consent, pub) {
+			if (!consent || consent.googleMode !== 'advanced') {
+				return false;
+			}
+			var hasGa4 = !!(pub && pub.ga4 && pub.ga4.measurementId);
+			var hasAds = !!(pub && pub.google && pub.google.conversionId);
+
+			return hasGa4 || hasAds;
+		}
+
+		function defaultsCommand(consent) {
+			var o = {
+				ad_storage: 'denied',
+				ad_user_data: 'denied',
+				ad_personalization: 'denied',
+				analytics_storage: 'denied',
+				wait_for_update: 500
+			};
+			if (consent && consent.consentRegion === 'eea') {
+				o.region = EEA_UK_CH.slice();
+			}
+
+			return o;
+		}
+
+		/** On ne dit a Google que ce qu'on sait. Un signal null n'est pas envoye. */
+		function updateCommand(ads, analytics) {
+			var o = {};
+			if (ads === true || ads === false) {
+				var a = ads ? 'granted' : 'denied';
+				o.ad_storage = a;
+				o.ad_user_data = a;
+				o.ad_personalization = a;
+			}
+			if (analytics === true || analytics === false) {
+				o.analytics_storage = analytics ? 'granted' : 'denied';
+			}
+
+			return o;
+		}
+
+		/**
+		 * Un outil de consentement a-t-il deja pose son defaut ? Beaucoup le font
+		 * (Cookiebot, Complianz, df-cookie-consent...). Deux sources d'ordres
+		 * peuvent se contredire : si l'outil parle deja a Google, on le laisse
+		 * parler seul. Verifie sur banc avant ecriture (spec V1).
+		 */
+		function hasConsentDefault(dl, gtd) {
+			// Un outil pose dans GTM passe par l'API de consentement de GTM, qui
+			// n'ecrit pas dans le dataLayer. google_tag_data.ics.usedDefault le
+			// dit : false sans defaut, true apres (mesure sur banc le 29/09).
+			// Objet interne de Google : s'il disparait, on retombe sur le dataLayer.
+			try {
+				if (gtd && gtd.ics && gtd.ics.usedDefault === true) {
+					return true;
+				}
+			} catch (x) {}
+			if (!dl || typeof dl.length !== 'number') {
+				return false;
+			}
+			for (var i = 0; i < dl.length; i++) {
+				try {
+					var e = dl[i];
+					if (e && e[0] === 'consent' && e[1] === 'default') {
+						return true;
+					}
+				} catch (x) {}
+			}
+
+			return false;
+		}
+
+		function ga4Params(data) {
+			var d = data || {};
+			var p = {};
+			if (typeof d.value === 'number' && isFinite(d.value)) {
+				p.value = d.value;
+			}
+			if (typeof d.currency === 'string' && d.currency !== '') {
+				p.currency = d.currency;
+			}
+			if (typeof d.orderId === 'string' && d.orderId !== '') {
+				p.transaction_id = d.orderId;
+			}
+			if (d.items && typeof d.items.length === 'number' && d.items.length) {
+				p.items = Array.prototype.slice.call(d.items, 0, 200);
+			}
+
+			return p;
+		}
+
+		/**
+		 * Le verdict est celui ENREGISTRE SUR LA COMMANDE, ecrit dans la page par le
+		 * plugin. Le serveur envoie l'achat pour tout sauf 'denied'. Un verdict
+		 * absent (ancienne commande, plugin partiel) laisse l'achat au serveur :
+		 * au pire on perd une modelisation, jamais on ne compte double.
+		 */
+		function ga4FromBrowserForPurchase(verdict) {
+			return verdict === 'denied';
+		}
+
+		function boot(env) {
+			var w = env.win;
+			w.dataLayer = w.dataLayer || [];
+			if (typeof w.gtag !== 'function') {
+				w.gtag = function () { w.dataLayer.push(arguments); };
+			}
+			var owned = !hasConsentDefault(w.dataLayer, w.google_tag_data);
+			if (owned) {
+				w.gtag('consent', 'default', defaultsCommand(env.consent));
+			}
+			w.gtag('set', 'ads_data_redaction', !(env.consent && env.consent.adsDataRedaction === false));
+			try { env.injectGa4(); } catch (e) {}
+			try { env.injectGoogleAds(); } catch (e) {}
+			if (owned) {
+				var push = function () {
+					var u = updateCommand(env.adsState(), env.analyticsState());
+					for (var k in u) {
+						if (Object.prototype.hasOwnProperty.call(u, k)) {
+							w.gtag('consent', 'update', u);
+							return;
+						}
+					}
+				};
+				push();
+				env.bind(push);
+			}
+
+			return owned;
+		}
+
+		function fire(env, name, eventId, data, verdict) {
+			var sent = [];
+			var w = env.win;
+			var ga4Id = env.pub && env.pub.ga4 && env.pub.ga4.measurementId;
+			var ga4Name = env.ga4Map && env.ga4Map[name];
+			var toGa4 = !!(ga4Id && ga4Name && typeof w.gtag === 'function');
+			if (name === 'purchase' && !ga4FromBrowserForPurchase(verdict)) {
+				toGa4 = false;
+			}
+			if (toGa4) {
+				var params = ga4Params(data);
+				params.send_to = String(ga4Id);
+				try {
+					w.gtag('event', ga4Name, params); // dfss:ga4-advanced
+					sent.push('ga4');
+				} catch (e) {}
+			}
+			try { env.fireGoogleAds(name, data || {}); } catch (e) {}
+
+			return sent;
+		}
+
+		return {
+			isAdvanced: isAdvanced,
+			defaultsCommand: defaultsCommand,
+			updateCommand: updateCommand,
+			hasConsentDefault: hasConsentDefault,
+			ga4Params: ga4Params,
+			ga4FromBrowserForPurchase: ga4FromBrowserForPurchase,
+			boot: boot,
+			fire: fire
+		};
+	})();
+	// ---- DFSS-CONSENT-MODE:END ---------------------------------------------
 
 	// ---- consent ------------------------------------------------------------
 
