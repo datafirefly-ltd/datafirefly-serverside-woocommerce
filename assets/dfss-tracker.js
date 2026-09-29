@@ -13,8 +13,11 @@
  * Meta/GA/TikTok then deduplicate on (event_name, event_id): if an ad-blocker
  * kills step 2, only the server passes — always tracked, never doubled.
  *
- * NOTHING fires until marketing consent is granted (when required). No secret or
- * access token is ever present here — only the public destination ids.
+ * NOTHING fires until marketing consent is granted (when required) - except,
+ * when the merchant turned on Google Consent Mode "advanced", the Google tags
+ * themselves, cookieless until consent (see the DFSS-CONSENT-MODE block).
+ * No secret or access token is ever present here — only the public
+ * destination ids.
  *
  * No framework, no jQuery: this loads on the storefront and must stay tiny and
  * defensive (a tracking error must never break the page).
@@ -31,6 +34,10 @@
 	var NONCE = CFG.nonce || '';
 	var NONCE_URL = CFG.nonceUrl || '';
 	var COOKIE_DAYS = 90;
+
+	// Mode avance Google Consent Mode (option du marchand, eteinte par defaut).
+	// Toute la logique est dans le bloc partage DFSS_CM ; ici, la colle.
+	var CM_ON = false;
 
 	// The nonce baked into this page is only as fresh as the page itself. On a
 	// full-page cache it can be hours old, and lead / complete_registration /
@@ -1328,6 +1335,63 @@
 		return false;
 	}
 
+	/**
+	 * Le verdict publicite, a trois etats, pour Google Consent Mode : celui de
+	 * marketingConsentState(), complete par les chemins WordPress (WP Consent
+	 * API, Complianz) que seul hasMarketingConsent() lit. Leur refus reste
+	 * null : le refus par defaut deja pose suffit.
+	 */
+	function adsConsentState() {
+		var s = marketingConsentState();
+		if (s === null && hasMarketingConsent()) {
+			s = true;
+		}
+
+		return s;
+	}
+
+	/** Le verdict mesure d'audience, pour analytics_storage uniquement. */
+	function analyticsConsentState() {
+		if (!CONSENT.required) {
+			return true;
+		}
+		if (window.dfcc && typeof window.dfcc.hasConsent === 'function') {
+			try {
+				return !!window.dfcc.hasConsent('analytics');
+			} catch (e) {}
+		}
+		if (typeof window.wp_has_consent === 'function') {
+			try {
+				return !!window.wp_has_consent('statistics');
+			} catch (e) {}
+		}
+		if (CONSENT.cmp === 'complianz' && window.cmplz && typeof window.cmplz.has_consent === 'function') {
+			try {
+				return !!window.cmplz.has_consent('statistics');
+			} catch (e) {}
+		}
+		try {
+			return DFSS_CMP.analytics(CONSENT);
+		} catch (e) {}
+
+		return null;
+	}
+
+	function cmEnv() {
+		return {
+			win: window,
+			consent: CONSENT,
+			pub: PUBLIC,
+			ga4Map: GA4_MAP,
+			injectGa4: injectGa4,
+			injectGoogleAds: injectGoogleAds,
+			fireGoogleAds: fireGoogleAds,
+			adsState: adsConsentState,
+			analyticsState: analyticsConsentState,
+			bind: function (cb) { DFSS_CMP.bind(cb, CONSENT); }
+		};
+	}
+
 	// Run `fn` once consent is granted. If already granted, run now. Otherwise
 	// listen for the common "consent changed" signals and re-check.
 	var consentListenersBound = false;
@@ -1752,12 +1816,15 @@
 		} catch (e) {}
 	}
 
-	function fireClient(name, eventId, clientData) {
+	function fireClient(name, eventId, clientData, googleDone) {
 		fireMeta(name, eventId, clientData);
 		fireGa4(name, eventId, clientData);
 		fireTikTok(name, eventId, clientData);
 		fireOaiq(name, eventId, clientData);
-		fireGoogleAds(name, clientData);
+		// En mode avance, Google est deja parti au moment de track().
+		if (!googleDone) {
+			fireGoogleAds(name, clientData);
+		}
 	}
 
 	// ---- beacon to our server -----------------------------------------------
@@ -1794,9 +1861,9 @@
 		try { window.sessionStorage.removeItem(HOLD_KEY); } catch (e) {}
 	}
 
-	function heldPush(name, eventId, beaconData) {
+	function heldPush(name, eventId, beaconData, sentByBrowser) {
 		var list = heldRead();
-		list.push({ n: name, i: eventId, d: beaconData || {}, t: Date.now() });
+		list.push({ n: name, i: eventId, d: beaconData || {}, t: Date.now(), b: sentByBrowser || [] });
 		heldWrite(list);
 	}
 
@@ -1811,12 +1878,12 @@
 		for (var i = 0; i < list.length; i++) {
 			var row = list[i];
 			if (dfssHoldDecision(null, Date.now() - row.t, limit) === 'hold') {
-				try { beacon(row.n, row.i, row.d); } catch (e) {}
+				try { beacon(row.n, row.i, row.d, row.b); } catch (e) {}
 			}
 		}
 	}
 
-	function beacon(name, eventId, beaconData) {
+	function beacon(name, eventId, beaconData, sentByBrowser) {
 		if (!REST) {
 			return;
 		}
@@ -1833,6 +1900,11 @@
 		var ref = document.referrer;
 		if (ref && /^https?:\/\//i.test(ref)) {
 			body.page_referrer = ref;
+		}
+		// Mode avance : la balise GA4 a deja envoye cet evenement. Le dispatcher
+		// ne doit pas le renvoyer (GA4 ne dedoublonne pas gtag contre MP).
+		if (sentByBrowser && sentByBrowser.length) {
+			body.browser_sent = sentByBrowser.slice();
 		}
 		var payload = JSON.stringify(body);
 
@@ -1900,24 +1972,30 @@
 	// `opts.clientData` shapes the client pixel; `opts.beaconData` the server event.
 	function track(name, opts) {
 		opts = opts || {};
+		// Un seul identifiant, pour la balise, la retenue et l'envoi.
+		var eventId = opts.eventId || uuidv4();
+		var clientData = opts.clientData || opts.beaconData || {};
+
+		// Mode avance : Google part MAINTENANT, dans l'etat de consentement du
+		// moment (ping sans cookies tant que le visiteur n'a pas accepte).
+		var sentByBrowser = CM_ON ? DFSS_CM.fire(cmEnv(), name, eventId, clientData, opts.consentVerdict) : [];
 
 		// Pas encore de reponse a la banniere : on retient l'evenement CHEZ LE
 		// VISITEUR plutot que de le perdre. Rien ne part. S'il accepte,
 		// heldFlush l'envoie ; s'il refuse ou si le delai passe, il disparait.
 		if (!opts.clientOnly && dfssHoldDecision(marketingConsentState(), 0, holdMs()) === 'hold') {
-			heldPush(name, opts.eventId || uuidv4(), opts.beaconData || {});
+			heldPush(name, eventId, opts.beaconData || {}, sentByBrowser);
 		}
 
 		whenConsent(function () {
 			injectAll(); // safe to call repeatedly; injects once
-			var eventId = opts.eventId || uuidv4();
-			fireClient(name, eventId, opts.clientData || opts.beaconData || {});
+			fireClient(name, eventId, clientData, CM_ON);
 			// `clientOnly` fires the browser pixel but skips the server beacon.
 			// Used for purchase: the server side is delivered by the authoritative
 			// WooCommerce order hook (not the spoofable public beacon), keyed on the
 			// same "order_<id>" so the two sides still deduplicate exactly.
 			if (!opts.clientOnly) {
-				beacon(name, eventId, opts.beaconData || {});
+				beacon(name, eventId, opts.beaconData || {}, sentByBrowser);
 			}
 		});
 	}
@@ -2089,6 +2167,7 @@
 		track('purchase', {
 			eventId: p.eventId, // "order_<id>" — pinned by PHP
 			clientOnly: true,   // server side is delivered by the authoritative order hook, not the public beacon
+			consentVerdict: p.consent, // verdict enregistre sur la commande (mode avance)
 			clientData: {
 				value: num(p.value),
 				currency: p.currency,
@@ -2891,6 +2970,12 @@
 		whenConsent(captureClickIds);
 
 		// Auto events for the current page (each is internally consent-gated).
+		// Mode avance : le refus par defaut, puis les balises Google, AVANT le
+		// premier evenement. Sans l'option, rien ne change.
+		CM_ON = DFSS_CM.isAdvanced(CONSENT, PUBLIC);
+		if (CM_ON) {
+			DFSS_CM.boot(cmEnv());
+		}
 		trackPageView();
 		trackContentView();
 		trackContentList();
