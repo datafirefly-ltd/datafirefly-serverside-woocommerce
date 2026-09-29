@@ -25,6 +25,7 @@ define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-client.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-event-builder.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-consent.php';
+require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-settings.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-queue.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-rest.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-truth.php';
@@ -1043,13 +1044,8 @@ class DFSS_Plugin
             $o['dest_meta'] = isset($_POST['dfss_dest_meta']) ? 1 : 0;
             $o['dest_ga4'] = isset($_POST['dfss_dest_ga4']) ? 1 : 0;
             $o['dest_tiktok'] = isset($_POST['dfss_dest_tiktok']) ? 1 : 0;
-            $o['clickid_passthrough'] = isset($_POST['dfss_clickid_passthrough']) ? 1 : 0;
-            // Borne a 24 h : au-dela, un evenement retenu n'a plus de rapport
-            // avec la visite qui l'a produit.
-            $o['consent_hold_minutes'] = max(0, min(1440, isset($_POST['dfss_consent_hold_minutes']) ? (int) $_POST['dfss_consent_hold_minutes'] : 0));
-            $o['google_consent_mode'] = (isset($_POST['dfss_google_consent_mode']) && $_POST['dfss_google_consent_mode'] === 'advanced') ? 'advanced' : 'basic';
-            $o['consent_default_region'] = (isset($_POST['dfss_consent_default_region']) && $_POST['dfss_consent_default_region'] === 'eea') ? 'eea' : 'all';
-            $o['ads_data_redaction'] = isset($_POST['dfss_ads_data_redaction']) ? 1 : 0;
+            // Only the fields this form actually shows (DFSS_Settings).
+            $o = DFSS_Settings::apply_consent_fields($o, wp_unslash($_POST));
             update_option(self::OPTION, $o);
             add_settings_error('dfss', 'toggles', __('Tracking settings saved.', 'datafirefly-serverside'), 'updated');
 
@@ -1110,12 +1106,8 @@ class DFSS_Plugin
                 'dest_meta' => isset($_POST['dfss_dest_meta']) ? 1 : 0,
                 'dest_ga4' => isset($_POST['dfss_dest_ga4']) ? 1 : 0,
                 'dest_tiktok' => isset($_POST['dfss_dest_tiktok']) ? 1 : 0,
-                'clickid_passthrough' => isset($_POST['dfss_clickid_passthrough']) ? 1 : 0,
-                'consent_hold_minutes' => max(0, min(1440, isset($_POST['dfss_consent_hold_minutes']) ? (int) $_POST['dfss_consent_hold_minutes'] : 0)),
-                'google_consent_mode' => (isset($_POST['dfss_google_consent_mode']) && $_POST['dfss_google_consent_mode'] === 'advanced') ? 'advanced' : 'basic',
-                'consent_default_region' => (isset($_POST['dfss_consent_default_region']) && $_POST['dfss_consent_default_region'] === 'eea') ? 'eea' : 'all',
-                'ads_data_redaction' => isset($_POST['dfss_ads_data_redaction']) ? 1 : 0,
             );
+            $opts = DFSS_Settings::apply_consent_fields($opts, wp_unslash($_POST));
             update_option(self::OPTION, $opts);
             if (!empty($opts['enabled']) && $opts['tenant_id'] !== '' && $opts['hmac_secret'] !== '') {
                 DFSS_Queue::install();
@@ -1293,6 +1285,7 @@ class DFSS_Plugin
                                 <p class="description"><?php esc_html_e('Uncheck a destination you do not use: its third-party script (and its cookies) will never be loaded in your visitors\' browsers. Server-side destinations are managed in your DataFirefly client space.', 'datafirefly-serverside'); ?></p>
                             </td>
                         </tr>
+                        <?php $this->render_consent_fields($o); ?>
                     </table>
                     <p><button type="submit" name="dfss_update_toggles" class="button button-primary"><?php esc_html_e('Save settings', 'datafirefly-serverside'); ?></button></p>
                 </form>
@@ -1356,8 +1349,30 @@ class DFSS_Plugin
                                     <label style="display:block;"><input type="checkbox" name="dfss_dest_ga4" value="1" <?php checked(1, (int) $o['dest_ga4']); ?> /> GA4</label>
                                     <label style="display:block;"><input type="checkbox" name="dfss_dest_tiktok" value="1" <?php checked(1, (int) $o['dest_tiktok']); ?> /> TikTok</label>
                                 </td></tr>
+                            <?php $this->render_consent_fields($o); ?>
+                        </table>
+                        <p><button type="submit" name="dfss_save" class="button"><?php esc_html_e('Save', 'datafirefly-serverside'); ?></button></p>
+                    </form>
+                </div>
+            <?php endif; ?>
+        </div>
+        <?php
+    }
+
+    /**
+     * The five consent settings, shown in both the connected and the manual
+     * form. The hidden dfss_has_consent_fields tells the save handler that
+     * this form carries them (DFSS_Settings::apply_consent_fields): a form
+     * without it never resets them.
+     *
+     * @param array $o Saved options.
+     */
+    private function render_consent_fields(array $o)
+    {
+        ?>
                             <tr><th scope="row"><?php esc_html_e('Carry the ad click ID across pages', 'datafirefly-serverside'); ?></th>
                                 <td>
+                                    <input type="hidden" name="dfss_has_consent_fields" value="1" />
                                     <label><input type="checkbox" name="dfss_clickid_passthrough" value="1" <?php checked(1, (int) ($o['clickid_passthrough'] ?? 1)); ?> /> <?php esc_html_e('Enabled', 'datafirefly-serverside'); ?></label>
                                     <p class="description"><?php esc_html_e('A Google click ID only exists in the URL of the landing page. Without this, a shopper who arrives from an ad, browses, then accepts the banner has already lost it, and the sale can never be attributed. This carries it on your own internal links, in the URL only: nothing is written to the device, and it is never passed to another site. The cookie itself still waits for consent.', 'datafirefly-serverside'); ?></p>
                                 </td></tr>
@@ -1387,12 +1402,6 @@ class DFSS_Plugin
                                     <label><input type="checkbox" name="dfss_ads_data_redaction" value="1" <?php checked(1, (int) ($o['ads_data_redaction'] ?? 1)); ?> /> <?php esc_html_e('Enabled', 'datafirefly-serverside'); ?></label>
                                     <p class="description"><?php esc_html_e('Advanced mode only. Removes the Google click ID from the cookieless pings until the visitor accepts advertising. The most privacy-protective choice; Google says it can reduce modelling accuracy.', 'datafirefly-serverside'); ?></p>
                                 </td></tr>
-                        </table>
-                        <p><button type="submit" name="dfss_save" class="button"><?php esc_html_e('Save', 'datafirefly-serverside'); ?></button></p>
-                    </form>
-                </div>
-            <?php endif; ?>
-        </div>
         <?php
     }
 
