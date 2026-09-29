@@ -1089,8 +1089,10 @@
 	 * l'etat du consentement. Spec : SPEC-MODE-AVANCE-CONSENTEMENT-2026-09-29.
 	 *
 	 * La regle qui empeche le double comptage GA4 vit ici et nulle part ailleurs :
-	 *   navigation  -> la balise GA4, et l'envoi au dispatcher porte browser_sent
-	 *                  pour qu'il ne la renvoie pas par Measurement Protocol ;
+	 *   navigation  -> la balise GA4 tant que le visiteur n'a PAS accepte (pings
+	 *                  sans cookies), et l'envoi au dispatcher, s'il part plus tard,
+	 *                  porte browser_sent ; des qu'il a accepte, le serveur seul,
+	 *                  comme en mode de base (resistant aux bloqueurs) ;
 	 *   achat       -> la balise GA4 SEULEMENT si la commande a ete refusee
 	 *                  (le serveur n'envoie rien dans ce cas), sinon le serveur seul.
 	 *
@@ -1246,6 +1248,16 @@
 			var ga4Name = env.ga4Map && env.ga4Map[name];
 			var toGa4 = !!(ga4Id && ga4Name && typeof w.gtag === 'function');
 			if (name === 'purchase' && !ga4FromBrowserForPurchase(verdict)) {
+				toGa4 = false;
+			}
+			// Un visiteur qui a deja accepte est mesure par le serveur, comme en
+			// mode de base. Un bloqueur de publicite coupe gtag.js mais pas l'envoi
+			// a la boutique : si la balise marquait cet evenement comme envoye, le
+			// dispatcher sauterait GA4 et l'evenement n'arriverait par aucun des
+			// deux chemins (relecture du 29/09). La balise ne porte que les pings
+			// sans cookies de ceux qui n'ont pas (encore) accepte ; l'achat, lui,
+			// suit le verdict de la commande.
+			if (name !== 'purchase' && env.adsState() === true) {
 				toGa4 = false;
 			}
 			if (toGa4) {
