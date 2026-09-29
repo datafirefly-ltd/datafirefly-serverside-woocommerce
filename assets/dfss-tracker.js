@@ -537,6 +537,10 @@
 	 *       null  : no tool we understand answered — the caller falls back to its
 	 *               own platform signal, and denies if that says nothing either.
 	 *
+	 *   DFSS_CMP.analytics(opts) -> true | false | null
+	 *       Same three states, for audience measurement (analytics_storage).
+	 *       Used ONLY by Google Consent Mode advanced; never gates a send.
+	 *
 	 *   DFSS_CMP.bind(onChange)
 	 *       Subscribe to every "the visitor changed their mind" signal we know.
 	 *
@@ -737,6 +741,122 @@
 			},
 		];
 
+		// ---- mesure d'audience (analytics_storage) ------------------------------
+		//
+		// Un second signal, lu a part, qui ne sert QU'AU mode avance de Google
+		// Consent Mode (analytics_storage). Il ne decide jamais d'aucun envoi : le
+		// seul verdict qui ouvre Meta, TikTok, OpenAI ou le dispatcher reste
+		// granted(). Un outil dont on ne connait pas la categorie mesure repond
+		// null, donc refuse : GA4 recoit alors son ping sans cookies, rien de plus.
+		var ANALYTICS_PROBES = [
+			function () {
+				if (window.dfcc && typeof window.dfcc.hasConsent === 'function') {
+					return !!window.dfcc.hasConsent('analytics');
+				}
+				return null;
+			},
+			// TCF : 8 = mesurer la performance des contenus, 9 = comprendre les
+			// audiences par des statistiques. Les deux, par prudence.
+			function () {
+				if (typeof window.__tcfapi !== 'function') {
+					return null;
+				}
+				var out = null;
+				try {
+					window.__tcfapi('getTCData', 2, function (data, ok) {
+						if (ok && data && data.purpose && data.purpose.consents) {
+							out = !!(data.purpose.consents[8] && data.purpose.consents[9]);
+						}
+					});
+				} catch (e) {}
+				return out;
+			},
+			function () {
+				if (window.Cookiebot && window.Cookiebot.consent) {
+					return !!window.Cookiebot.consent.statistics;
+				}
+				return null;
+			},
+			function () {
+				try {
+					if (typeof window.getCkyConsent === 'function') {
+						var c = window.getCkyConsent();
+						if (c && c.categories) {
+							return !!c.categories.analytics;
+						}
+					}
+				} catch (e) {}
+				return null;
+			},
+			// Iubenda : la finalite 5 est « Mesure ».
+			function () {
+				try {
+					if (window._iub && window._iub.cs && window._iub.cs.consent && window._iub.cs.consent.purposes) {
+						return !!window._iub.cs.consent.purposes[5];
+					}
+				} catch (e) {}
+				return null;
+			},
+			// OneTrust : C0002 est « Performance Cookies » dans tous leurs modeles.
+			function () {
+				try {
+					var groups = window.OnetrustActiveGroups || window.OptanonActiveGroups;
+					if (typeof groups === 'string' && groups !== '') {
+						return groups.indexOf('C0002') !== -1;
+					}
+				} catch (e) {}
+				return null;
+			},
+			function () {
+				try {
+					if (window.cookiehub && typeof window.cookiehub.hasConsented === 'function') {
+						return !!window.cookiehub.hasConsented('analytics');
+					}
+				} catch (e) {}
+				return null;
+			},
+			function () {
+				try {
+					if (window.Osano && window.Osano.cm && typeof window.Osano.cm.getConsent === 'function') {
+						var c = window.Osano.cm.getConsent();
+						if (c && typeof c.ANALYTICS === 'string') {
+							return c.ANALYTICS === 'ACCEPT';
+						}
+					}
+				} catch (e) {}
+				return null;
+			},
+			function () {
+				try {
+					var b = window.BorlabsCookie;
+					if (b && b.Consents && typeof b.Consents.hasConsent === 'function') {
+						return !!b.Consents.hasConsent('statistics');
+					}
+					if (b && typeof b.hasCookieGroupConsent === 'function') {
+						return !!b.hasCookieGroupConsent('statistics');
+					}
+				} catch (e) {}
+				return null;
+			},
+			function () {
+				try {
+					if (window.klaro && typeof window.klaro.getManager === 'function') {
+						var consents = window.klaro.getManager().consents;
+						if (consents && typeof consents === 'object') {
+							var names = ['google-analytics', 'googleAnalytics', 'analytics', 'ga4'];
+							for (var i = 0; i < names.length; i++) {
+								if (consents[names[i]] === true) {
+									return true;
+								}
+							}
+							return false;
+						}
+					}
+				} catch (e) {}
+				return null;
+			},
+		];
+
 		/**
 		 * tarteaucitron, which is configuration-driven rather than category-driven:
 		 * the merchant tells us which of its "services" count as advertising, so
@@ -822,6 +942,49 @@
 			return out;
 		}
 
+		/** tarteaucitron, cote mesure : memes regles que tarteaucitron(). */
+		function tarteaucitronAnalytics(opts) {
+			var jobs = (opts && opts.analyticsJobs) || ['gtag', 'analytics', 'gajs'];
+			var i;
+			try {
+				if (window.tarteaucitron && window.tarteaucitron.state) {
+					for (i = 0; i < jobs.length; i++) {
+						if (window.tarteaucitron.state[jobs[i]] === true) {
+							return true;
+						}
+					}
+				}
+			} catch (e) {}
+			var raw = readCookie((opts && opts.cookieName) || 'tarteaucitron');
+			if (raw) {
+				var choices = parseTarteaucitronCookie(raw);
+				if (choices) {
+					for (i = 0; i < jobs.length; i++) {
+						if (choices[jobs[i]] === true) {
+							return true;
+						}
+					}
+					return false;
+				}
+			}
+			return null;
+		}
+
+		function analytics(opts) {
+			for (var i = 0; i < ANALYTICS_PROBES.length; i++) {
+				var v = null;
+				try {
+					v = ANALYTICS_PROBES[i]();
+				} catch (e) {
+					v = null;
+				}
+				if (v === true || v === false) {
+					return v;
+				}
+			}
+			return tarteaucitronAnalytics(opts || {});
+		}
+
 		function granted(opts) {
 			for (var i = 0; i < PROBES.length; i++) {
 				var v = null;
@@ -900,7 +1063,7 @@
 			} catch (e) {}
 		}
 
-		return { granted: granted, bind: bind };
+		return { granted: granted, analytics: analytics, bind: bind };
 	})();
 	// ---- DFSS-CONSENT-CORE:END ---------------------------------------------
 
