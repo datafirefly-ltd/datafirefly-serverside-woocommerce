@@ -1395,7 +1395,7 @@ class DFSS_Plugin
                                         <option value="all" <?php selected('all', (string) ($o['consent_default_region'] ?? 'all')); ?>><?php esc_html_e('Everywhere', 'datafirefly-serverside'); ?></option>
                                         <option value="eea" <?php selected('eea', (string) ($o['consent_default_region'] ?? 'all')); ?>><?php esc_html_e('EEA, United Kingdom and Switzerland only', 'datafirefly-serverside'); ?></option>
                                     </select>
-                                    <p class="description"><?php esc_html_e('Advanced mode only. With the second choice, visitors outside these countries are treated as consenting by the Google tags until they answer.', 'datafirefly-serverside'); ?></p>
+                                    <p class="description"><?php esc_html_e('Advanced mode only. With the second choice, visitors outside these countries are treated as consenting by the Google tags until they answer. Applies only when your consent tool does not already send Google its own default: if it does (Cookiebot, Complianz, DataFirefly Cookie Consent...), its default wins and this setting has no effect.', 'datafirefly-serverside'); ?></p>
                                 </td></tr>
                             <tr><th scope="row"><?php esc_html_e('Hide the ad click ID while ads consent is denied', 'datafirefly-serverside'); ?></th>
                                 <td>
