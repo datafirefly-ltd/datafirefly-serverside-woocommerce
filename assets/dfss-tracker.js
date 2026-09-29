@@ -357,24 +357,85 @@
 	}
 	// ---- DFSS_TEST_EXPORT_END
 
+	/**
+	 * Les identifiants lus dans l'URL de la page courante. En memoire, jamais
+	 * ecrits : c'est ce qui permet de les porter de page en page sans rien
+	 * stocker tant que le visiteur n'a pas repondu a la banniere.
+	 */
+	var pendingClickIds = { gclid: '', gbraid: '', wbraid: '' };
+
+	function readPendingClickIds() {
+		try {
+			pendingClickIds = {
+				gclid: getParam('gclid') || getCookie('_dfss_gclid') || '',
+				gbraid: getParam('gbraid') || getCookie('_dfss_gbraid') || '',
+				wbraid: getParam('wbraid') || getCookie('_dfss_wbraid') || ''
+			};
+		} catch (e) {}
+	}
+
+	/**
+	 * Porter l'identifiant sur les liens internes, au moment du clic.
+	 *
+	 * Au clic plutot qu'au chargement : les themes reecrivent le DOM sans
+	 * arret (filtres, pagination, recherche instantanee), et un lien decore a
+	 * l'avance serait remplace avant d'etre suivi. Un seul ecouteur delegue
+	 * couvre aussi tout ce qui apparait plus tard.
+	 *
+	 * Ne touche a rien des que le cookie existe : le consentement a ete donne,
+	 * l'identifiant est en surete, la propagation n'a plus d'objet.
+	 */
+	function wireClickIdPassthrough() {
+		// Le marchand peut la couper : c'est lui le responsable de traitement.
+		// Absent = active, pour que les boutiques deja installees ne perdent
+		// rien en montant de version.
+		if (CONSENT.clickIdPassthrough === false) {
+			return;
+		}
+		try {
+			document.addEventListener('click', function (ev) {
+				try {
+					if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) {
+						return;
+					}
+					if (getCookie('_dfss_gclid') || getCookie('_dfss_gbraid') || getCookie('_dfss_wbraid')) {
+						return;
+					}
+					var a = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
+					if (!a || a.hasAttribute('download') || (a.target && a.target !== '_self')) {
+						return;
+					}
+					var next = dfssDecorateUrl(a.getAttribute('href'), pendingClickIds, window.location.origin);
+					if (next) {
+						a.setAttribute('href', next);
+					}
+				} catch (e) {}
+			}, true);
+		} catch (e) {}
+	}
+
 	function captureClickIds() {
 		var fbclid = getParam('fbclid');
 		if (fbclid) {
 			// Only (re)write _dfss_fbc if we have a fresh fbclid.
 			setCookie('_dfss_fbc', 'fb.1.' + Date.now() + '.' + fbclid, COOKIE_DAYS);
 		}
-		var gclid = getParam('gclid');
+		// getParam d'abord, la memoire ensuite : si le visiteur accepte sur une
+		// page ou le parametre a ete retire (un theme qui reecrit l'URL, un
+		// history.replaceState), l'identifiant porte depuis l'atterrissage est
+		// encore la.
+		var gclid = getParam('gclid') || pendingClickIds.gclid;
 		if (gclid) {
 			setCookie('_dfss_gclid', gclid, COOKIE_DAYS);
 		}
 		// Google issues gbraid or wbraid INSTEAD of gclid when the journey
 		// crosses an app boundary or cookies are restricted. Same landing, same
 		// cookie lifetime: whichever one arrives is the one that attributes.
-		var gbraid = getParam('gbraid');
+		var gbraid = getParam('gbraid') || pendingClickIds.gbraid;
 		if (gbraid) {
 			setCookie('_dfss_gbraid', gbraid, COOKIE_DAYS);
 		}
-		var wbraid = getParam('wbraid');
+		var wbraid = getParam('wbraid') || pendingClickIds.wbraid;
 		if (wbraid) {
 			setCookie('_dfss_wbraid', wbraid, COOKIE_DAYS);
 		}

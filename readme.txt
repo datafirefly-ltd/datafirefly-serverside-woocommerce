@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.25.2
+Stable tag: 2.25.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -58,6 +58,9 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.25.3 =
+* Fix: since 2.25.0 the storefront tracker stopped on page load (two click-ID functions were missing), so no browser event was sent: no page view, no pixel, no add-to-cart. Purchases sent by the server were not affected.
 
 = 2.25.2 =
 * Housekeeping, no change to what the plugin does. The development test benches, the developer README and the .gitignore no longer travel inside the archive: they are repository files, not plugin files. The readme now states plainly which service the plugin talks to, what it sends and when, with links to the terms and the privacy policy.
