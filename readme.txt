@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.26.1
+Stable tag: 2.27.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -59,8 +59,9 @@ Yes. When "Require consent" is on (default), no tag is injected and no event is 
 
 == Changelog ==
 
-= 2.26.1 =
-* Housekeeping, no change to what the plugin does. The package passes the WordPress Plugin Check with no error: the .htaccess file is no longer shipped (hidden files are not allowed in the plugin directory; every PHP file already refuses direct access), and the settings helper uses the standard direct-access guard. The shared consent code and the design stylesheet carry their licence header.
+= 2.27.0 =
+* The plugin now uses its wordpress.org identifier everywhere: folder datafirefly-server-side, text domain datafirefly-server-side. Copies downloaded from the DataFirefly client space until 2.26.x used the folder datafirefly-serverside, which WordPress treats as a different plugin. Activating 2.27.0 on such a shop switches the older copy off and keeps every setting; the older copy can then be deleted from the Plugins screen without losing the connection, because its uninstall no longer takes the shared settings with it.
+* The package passes the WordPress Plugin Check with no error: no hidden file is shipped (every PHP file already refuses direct access), and the settings helper uses the standard direct-access guard. The shared consent code and the design stylesheet carry their licence header.
 
 = 2.26.0 =
 * New: optional Google Consent Mode "advanced" (off by default). Before consent, only the Google tags load, cookieless, for Google's modelling; Meta, TikTok and every other platform still wait for consent. Once the visitor accepts, measurement goes through the server as before, so ad blockers do not take it away. A purchase is sent to GA4 by the browser only when the server did not send it.
@@ -137,3 +138,8 @@ Yes. When "Require consent" is on (default), no tag is injected and no event is 
 
 = 1.x =
 * Server-side purchase event delivery.
+
+== Upgrade Notice ==
+
+= 2.27.0 =
+If you installed the plugin from the DataFirefly client space (folder datafirefly-serverside), install and activate this version first: it takes over with the same settings. Then delete the older copy.

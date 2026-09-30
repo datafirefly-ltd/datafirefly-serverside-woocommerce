@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.26.1
+ * Version:           2.27.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -10,14 +10,33 @@
  * WC requires at least: 5.0
  * License:           GPLv2 or later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain:       datafirefly-serverside
+ * Text Domain:       datafirefly-server-side
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-define('DFSS_VERSION', '2.26.1');
+// Another copy of this plugin is already loaded: the one the DataFirefly
+// client space shipped before 2.27.0, in the "datafirefly-serverside" folder
+// (see includes/class-dfss-legacy.php). Declaring the same classes twice is a
+// fatal error, so this copy stays out of the way. When it is the one being
+// activated, it takes over: the older copy is switched off, silently so its
+// deactivation does not unschedule the cron hooks both copies share, and the
+// settings, stored under the same names, carry over as they are.
+if (defined('DFSS_VERSION')) {
+    if (!function_exists('dfss_take_over_legacy_copy')) {
+        function dfss_take_over_legacy_copy()
+        {
+            deactivate_plugins('datafirefly-serverside/datafirefly-serverside.php', true);
+        }
+    }
+    register_activation_hook(__FILE__, 'dfss_take_over_legacy_copy');
+
+    return;
+}
+
+define('DFSS_VERSION', '2.27.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -29,6 +48,7 @@ require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-settings.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-queue.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-rest.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-truth.php';
+require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-legacy.php';
 
 // Declare WooCommerce HPOS (custom order tables) compatibility.
 add_action('before_woocommerce_init', function () {
@@ -144,7 +164,7 @@ class DFSS_Plugin
         if (!isset($schedules['dfss_5min'])) {
             $schedules['dfss_5min'] = array(
                 'interval' => 300,
-                'display' => __('Every 5 minutes (DataFirefly retry)', 'datafirefly-serverside'),
+                'display' => __('Every 5 minutes (DataFirefly retry)', 'datafirefly-server-side'),
             );
         }
 
@@ -888,8 +908,8 @@ class DFSS_Plugin
         // Activity panel (observability).
         add_submenu_page(
             'options-general.php',
-            __('DataFirefly Activity', 'datafirefly-serverside'),
-            __('DataFirefly Activity', 'datafirefly-serverside'),
+            __('DataFirefly Activity', 'datafirefly-server-side'),
+            __('DataFirefly Activity', 'datafirefly-server-side'),
             'manage_options',
             'datafirefly-activity',
             array($this, 'render_activity')
@@ -899,7 +919,7 @@ class DFSS_Plugin
     public function enqueue_admin($hook)
     {
         // Only on our two settings screens.
-        if (strpos((string) $hook, 'datafirefly-serverside') === false
+        if (strpos((string) $hook, 'datafirefly-server-side') === false
             && strpos((string) $hook, 'datafirefly-activity') === false) {
             return;
         }
@@ -1015,7 +1035,7 @@ class DFSS_Plugin
             // alter a valid key; decode_key() then re-validates the charset.
             $decoded = $this->decode_key(isset($_POST['dfss_connkey']) ? sanitize_text_field(wp_unslash($_POST['dfss_connkey'])) : '');
             if (null === $decoded) {
-                add_settings_error('dfss', 'badkey', __('That connection key is not valid. Copy it again from your DataFirefly client space.', 'datafirefly-serverside'), 'error');
+                add_settings_error('dfss', 'badkey', __('That connection key is not valid. Copy it again from your DataFirefly client space.', 'datafirefly-server-side'), 'error');
 
                 return;
             }
@@ -1054,7 +1074,7 @@ class DFSS_Plugin
                 'dest_meta' => 1, 'dest_ga4' => 1, 'dest_tiktok' => 1,
             ));
             delete_option(self::PUBLIC_OPTION);
-            add_settings_error('dfss', 'disconnected', __('Disconnected.', 'datafirefly-serverside'), 'updated');
+            add_settings_error('dfss', 'disconnected', __('Disconnected.', 'datafirefly-server-side'), 'updated');
 
             return;
         }
@@ -1071,7 +1091,7 @@ class DFSS_Plugin
             // Only the fields this form actually shows (DFSS_Settings).
             $o = DFSS_Settings::apply_consent_fields($o, wp_unslash($_POST));
             update_option(self::OPTION, $o);
-            add_settings_error('dfss', 'toggles', __('Tracking settings saved.', 'datafirefly-serverside'), 'updated');
+            add_settings_error('dfss', 'toggles', __('Tracking settings saved.', 'datafirefly-server-side'), 'updated');
 
             return;
         }
@@ -1080,10 +1100,10 @@ class DFSS_Plugin
         if (isset($_POST['dfss_refresh_public'])) {
             $pub = $this->refresh_public_config($this->opts());
             if (!empty($pub['ok'])) {
-                add_settings_error('dfss', 'pub_ok', __('Destination ids refreshed.', 'datafirefly-serverside'), 'updated');
+                add_settings_error('dfss', 'pub_ok', __('Destination ids refreshed.', 'datafirefly-server-side'), 'updated');
             } else {
                 /* translators: %d: HTTP status code returned by the dispatcher. */
-                add_settings_error('dfss', 'pub_ko', sprintf(__('Could not refresh destination ids (HTTP %d).', 'datafirefly-serverside'), (int) $pub['code']), 'error');
+                add_settings_error('dfss', 'pub_ko', sprintf(__('Could not refresh destination ids (HTTP %d).', 'datafirefly-server-side'), (int) $pub['code']), 'error');
             }
 
             return;
@@ -1101,7 +1121,7 @@ class DFSS_Plugin
             $typed = isset($_POST['dfss_hmac_secret']) ? trim((string) wp_unslash($_POST['dfss_hmac_secret'])) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated against a strict charset just below, never altered.
             if ($typed !== '') {
                 if (!preg_match('/^[A-Za-z0-9+\/=_.\-]{1,512}$/', $typed)) {
-                    add_settings_error('dfss', 'badsecret', __('The HMAC secret contains characters that are not part of a DataFirefly secret. Copy it again from your client space.', 'datafirefly-serverside'), 'error');
+                    add_settings_error('dfss', 'badsecret', __('The HMAC secret contains characters that are not part of a DataFirefly secret. Copy it again from your client space.', 'datafirefly-server-side'), 'error');
 
                     return;
                 }
@@ -1115,7 +1135,7 @@ class DFSS_Plugin
             $endpoint = isset($_POST['dfss_endpoint']) ? esc_url_raw(wp_unslash($_POST['dfss_endpoint'])) : '';
             $scheme = $endpoint !== '' ? wp_parse_url($endpoint, PHP_URL_SCHEME) : '';
             if ($endpoint === '' || strtolower((string) $scheme) !== 'https' || !wp_http_validate_url($endpoint)) {
-                add_settings_error('dfss', 'badendpoint', __('The endpoint must be a valid https:// URL. Settings were not saved.', 'datafirefly-serverside'), 'error');
+                add_settings_error('dfss', 'badendpoint', __('The endpoint must be a valid https:// URL. Settings were not saved.', 'datafirefly-server-side'), 'error');
 
                 return;
             }
@@ -1138,7 +1158,7 @@ class DFSS_Plugin
                 DFSS_Queue::schedule_cron();
                 $this->refresh_public_config($opts);
             }
-            add_settings_error('dfss', 'saved', __('Settings saved.', 'datafirefly-serverside'), 'updated');
+            add_settings_error('dfss', 'saved', __('Settings saved.', 'datafirefly-server-side'), 'updated');
 
             return;
         }
@@ -1177,18 +1197,18 @@ class DFSS_Plugin
 
         if ($just_connected) {
             if ($connection_ok) {
-                $msg = __('Connected! Your shop is live, a test event just reached DataFirefly.', 'datafirefly-serverside');
+                $msg = __('Connected! Your shop is live, a test event just reached DataFirefly.', 'datafirefly-server-side');
                 if (is_array($pub) && !empty($pub['ok'])) {
                     $dests = $this->describe_destinations($this->filtered_public_config($pub['public'], $opts));
                     if ($dests !== '') {
                         /* translators: %s: comma-separated list of destinations (e.g. Meta, GA4, TikTok). */
-                        $msg .= ' ' . sprintf(__('Client tags will load for: %s.', 'datafirefly-serverside'), $dests);
+                        $msg .= ' ' . sprintf(__('Client tags will load for: %s.', 'datafirefly-server-side'), $dests);
                     }
                 }
                 add_settings_error('dfss', 'connected', $msg, 'updated');
             } else {
                 /* translators: %d: HTTP status code returned by the dispatcher. */
-                add_settings_error('dfss', 'connfail', sprintf(__('Connected, but the test was rejected (HTTP %d). Ask your DataFirefly operator to check your tenant is active.', 'datafirefly-serverside'), $code), 'error');
+                add_settings_error('dfss', 'connfail', sprintf(__('Connected, but the test was rejected (HTTP %d). Ask your DataFirefly operator to check your tenant is active.', 'datafirefly-server-side'), $code), 'error');
             }
 
             return;
@@ -1196,13 +1216,13 @@ class DFSS_Plugin
 
         if (!empty($result['ok'])) {
             /* translators: %d: HTTP status code returned by the dispatcher. */
-            add_settings_error('dfss', 'test_ok', sprintf(__('Test event delivered (HTTP %d).', 'datafirefly-serverside'), $code), 'updated');
+            add_settings_error('dfss', 'test_ok', sprintf(__('Test event delivered (HTTP %d).', 'datafirefly-server-side'), $code), 'updated');
         } elseif ($connection_ok) {
             /* translators: %d: HTTP status code returned by the dispatcher. */
-            add_settings_error('dfss', 'test_partial', sprintf(__('Reached DataFirefly (HTTP %d): a destination rejected the test event. Your connection is fine.', 'datafirefly-serverside'), $code), 'updated');
+            add_settings_error('dfss', 'test_partial', sprintf(__('Reached DataFirefly (HTTP %d): a destination rejected the test event. Your connection is fine.', 'datafirefly-server-side'), $code), 'updated');
         } else {
             /* translators: 1: HTTP status code, 2: error message from the dispatcher. */
-            add_settings_error('dfss', 'test_ko', sprintf(__('Test failed: HTTP %1$d, %2$s', 'datafirefly-serverside'), $code, esc_html($result['message'])), 'error');
+            add_settings_error('dfss', 'test_ko', sprintf(__('Test failed: HTTP %1$d, %2$s', 'datafirefly-server-side'), $code, esc_html($result['message'])), 'error');
         }
     }
 
@@ -1247,14 +1267,14 @@ class DFSS_Plugin
                 <div class="notice notice-success inline" style="margin:16px 0;">
                     <p style="font-size:14px;">
                         <span class="dashicons dashicons-yes-alt" style="color:#008D9E;"></span>
-                        <strong><?php esc_html_e('Connected', 'datafirefly-serverside'); ?></strong> :
-                        <?php esc_html_e('tracking is sent to', 'datafirefly-serverside'); ?>
+                        <strong><?php esc_html_e('Connected', 'datafirefly-server-side'); ?></strong> :
+                        <?php esc_html_e('tracking is sent to', 'datafirefly-server-side'); ?>
                         <code><?php echo esc_html($o['tenant_id']); ?></code>.
                         <?php
                         $dests = $this->describe_destinations($active_public);
                         if ($dests !== '') {
                             /* translators: %s: comma-separated list of destinations (e.g. Meta, GA4, TikTok). */
-                            echo ' ' . esc_html(sprintf(__('Client tags: %s.', 'datafirefly-serverside'), $dests));
+                            echo ' ' . esc_html(sprintf(__('Client tags: %s.', 'datafirefly-server-side'), $dests));
                         }
                         ?>
                     </p>
@@ -1264,29 +1284,29 @@ class DFSS_Plugin
                     <?php wp_nonce_field('dfss_save', 'dfss_nonce'); ?>
                     <table class="form-table" role="presentation">
                         <tr>
-                            <th scope="row"><?php esc_html_e('Complete tracking', 'datafirefly-serverside'); ?></th>
+                            <th scope="row"><?php esc_html_e('Complete tracking', 'datafirefly-server-side'); ?></th>
                             <td>
                                 <label>
                                     <input type="checkbox" name="dfss_complete_tracking" value="1" <?php checked(1, (int) $o['complete_tracking']); ?> />
-                                    <?php esc_html_e('Inject the light client tags and track the full funnel (page view, product view, add to cart, checkout, purchase). Recommended.', 'datafirefly-serverside'); ?>
+                                    <?php esc_html_e('Inject the light client tags and track the full funnel (page view, product view, add to cart, checkout, purchase). Recommended.', 'datafirefly-server-side'); ?>
                                 </label>
-                                <p class="description"><?php esc_html_e('When off, only the server-side purchase event is sent (v1 behaviour).', 'datafirefly-serverside'); ?></p>
+                                <p class="description"><?php esc_html_e('When off, only the server-side purchase event is sent (v1 behaviour).', 'datafirefly-server-side'); ?></p>
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row"><?php esc_html_e('Require consent', 'datafirefly-serverside'); ?></th>
+                            <th scope="row"><?php esc_html_e('Require consent', 'datafirefly-server-side'); ?></th>
                             <td>
                                 <label>
                                     <input type="checkbox" name="dfss_require_consent" value="1" <?php checked(1, (int) $o['require_consent']); ?> />
-                                    <?php esc_html_e('Do not fire anything until marketing consent is granted. Detected without configuration: WP Consent API, Complianz, DataFirefly Cookie Consent, Cookiebot, IAB TCF v2, Didomi, Usercentrics, CookieYes, Iubenda, OneTrust, Cookiehub, Osano, Borlabs, Klaro, tarteaucitron.', 'datafirefly-serverside'); ?>
+                                    <?php esc_html_e('Do not fire anything until marketing consent is granted. Detected without configuration: WP Consent API, Complianz, DataFirefly Cookie Consent, Cookiebot, IAB TCF v2, Didomi, Usercentrics, CookieYes, Iubenda, OneTrust, Cookiehub, Osano, Borlabs, Klaro, tarteaucitron.', 'datafirefly-server-side'); ?>
                                 </label>
                                 <?php if (!DFSS_Consent::has_wp_consent_api()) : ?>
-                                    <p class="description"><?php esc_html_e('Tip: install the WP Consent API plugin for the most reliable consent signal.', 'datafirefly-serverside'); ?></p>
+                                    <p class="description"><?php esc_html_e('Tip: install the WP Consent API plugin for the most reliable consent signal.', 'datafirefly-server-side'); ?></p>
                                 <?php endif; ?>
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row"><?php esc_html_e('Client destinations', 'datafirefly-serverside'); ?></th>
+                            <th scope="row"><?php esc_html_e('Client destinations', 'datafirefly-server-side'); ?></th>
                             <td>
                                 <?php
                                 // Which destinations the dispatcher has configured
@@ -1302,72 +1322,72 @@ class DFSS_Plugin
                                         <input type="checkbox" name="dfss_<?php echo esc_attr($dfss_key); ?>" value="1" <?php checked(1, (int) $o[$dfss_key]); ?> />
                                         <?php echo esc_html($dfss_info[0]); ?>
                                         <?php if (!$dfss_info[1]) : ?>
-                                            <em class="description">(<?php esc_html_e('not configured on your DataFirefly account', 'datafirefly-serverside'); ?>)</em>
+                                            <em class="description">(<?php esc_html_e('not configured on your DataFirefly account', 'datafirefly-server-side'); ?>)</em>
                                         <?php endif; ?>
                                     </label>
                                 <?php endforeach; ?>
-                                <p class="description"><?php esc_html_e('Uncheck a destination you do not use: its third-party script (and its cookies) will never be loaded in your visitors\' browsers. Server-side destinations are managed in your DataFirefly client space.', 'datafirefly-serverside'); ?></p>
+                                <p class="description"><?php esc_html_e('Uncheck a destination you do not use: its third-party script (and its cookies) will never be loaded in your visitors\' browsers. Server-side destinations are managed in your DataFirefly client space.', 'datafirefly-server-side'); ?></p>
                             </td>
                         </tr>
                         <?php $this->render_consent_fields($o); ?>
                     </table>
-                    <p><button type="submit" name="dfss_update_toggles" class="button button-primary"><?php esc_html_e('Save settings', 'datafirefly-serverside'); ?></button></p>
+                    <p><button type="submit" name="dfss_update_toggles" class="button button-primary"><?php esc_html_e('Save settings', 'datafirefly-server-side'); ?></button></p>
                 </form>
 
                 <p style="margin-top:8px;">
-                    <a href="<?php echo esc_url(admin_url('options-general.php?page=datafirefly-activity')); ?>"><?php esc_html_e('View activity', 'datafirefly-serverside'); ?></a>
+                    <a href="<?php echo esc_url(admin_url('options-general.php?page=datafirefly-activity')); ?>"><?php esc_html_e('View activity', 'datafirefly-server-side'); ?></a>
                 </p>
 
                 <hr style="margin:24px 0;" />
 
                 <form method="post" action="" style="display:inline-block;margin-right:8px;">
                     <?php wp_nonce_field('dfss_save', 'dfss_nonce'); ?>
-                    <button type="submit" name="dfss_test" class="button"><?php esc_html_e('Send test event', 'datafirefly-serverside'); ?></button>
+                    <button type="submit" name="dfss_test" class="button"><?php esc_html_e('Send test event', 'datafirefly-server-side'); ?></button>
                 </form>
                 <form method="post" action="" style="display:inline-block;margin-right:8px;">
                     <?php wp_nonce_field('dfss_save', 'dfss_nonce'); ?>
-                    <button type="submit" name="dfss_refresh_public" class="button"><?php esc_html_e('Refresh destination ids', 'datafirefly-serverside'); ?></button>
+                    <button type="submit" name="dfss_refresh_public" class="button"><?php esc_html_e('Refresh destination ids', 'datafirefly-server-side'); ?></button>
                 </form>
-                <form method="post" action="" style="display:inline-block;" onsubmit="return confirm('<?php echo esc_js(__('Disconnect this shop from DataFirefly?', 'datafirefly-serverside')); ?>');">
+                <form method="post" action="" style="display:inline-block;" onsubmit="return confirm('<?php echo esc_js(__('Disconnect this shop from DataFirefly?', 'datafirefly-server-side')); ?>');">
                     <?php wp_nonce_field('dfss_save', 'dfss_nonce'); ?>
-                    <button type="submit" name="dfss_disconnect" class="button button-link-delete"><?php esc_html_e('Disconnect', 'datafirefly-serverside'); ?></button>
+                    <button type="submit" name="dfss_disconnect" class="button button-link-delete"><?php esc_html_e('Disconnect', 'datafirefly-server-side'); ?></button>
                 </form>
 
             <?php else : ?>
                 <div class="card" style="max-width:620px;padding:8px 24px 24px;margin-top:16px;">
-                    <h2><?php esc_html_e('Connect your shop', 'datafirefly-serverside'); ?></h2>
-                    <p class="description" style="font-size:13px;"><?php esc_html_e('Paste the connection key from your DataFirefly client space (Connect your shop). That is the only step: we configure client and server tracking for you.', 'datafirefly-serverside'); ?></p>
+                    <h2><?php esc_html_e('Connect your shop', 'datafirefly-server-side'); ?></h2>
+                    <p class="description" style="font-size:13px;"><?php esc_html_e('Paste the connection key from your DataFirefly client space (Connect your shop). That is the only step: we configure client and server tracking for you.', 'datafirefly-server-side'); ?></p>
                     <form method="post" action="">
                         <?php wp_nonce_field('dfss_save', 'dfss_nonce'); ?>
                         <p>
                             <input type="password" name="dfss_connkey" class="large-text code" placeholder="dfss_..." autocomplete="off" />
                         </p>
                         <p>
-                            <button type="submit" name="dfss_connect" class="button button-primary button-hero"><?php esc_html_e('Connect', 'datafirefly-serverside'); ?></button>
+                            <button type="submit" name="dfss_connect" class="button button-primary button-hero"><?php esc_html_e('Connect', 'datafirefly-server-side'); ?></button>
                         </p>
                     </form>
                 </div>
 
                 <p style="margin-top:18px;">
-                    <a href="#" data-dfss-toggle-advanced onclick="document.getElementById('dfss-adv').style.display='block';this.style.display='none';return false;"><?php esc_html_e('Advanced: enter credentials manually', 'datafirefly-serverside'); ?></a>
+                    <a href="#" data-dfss-toggle-advanced onclick="document.getElementById('dfss-adv').style.display='block';this.style.display='none';return false;"><?php esc_html_e('Advanced: enter credentials manually', 'datafirefly-server-side'); ?></a>
                 </p>
                 <div id="dfss-adv" style="display:none;max-width:620px;">
                     <form method="post" action="">
                         <?php wp_nonce_field('dfss_save', 'dfss_nonce'); ?>
                         <table class="form-table" role="presentation">
-                            <tr><th scope="row"><label for="dfss_enabled"><?php esc_html_e('Enable', 'datafirefly-serverside'); ?></label></th>
+                            <tr><th scope="row"><label for="dfss_enabled"><?php esc_html_e('Enable', 'datafirefly-server-side'); ?></label></th>
                                 <td><input type="checkbox" id="dfss_enabled" name="dfss_enabled" value="1" <?php checked(1, (int) $o['enabled']); ?> /></td></tr>
-                            <tr><th scope="row"><label for="dfss_tenant_id"><?php esc_html_e('Tenant ID', 'datafirefly-serverside'); ?></label></th>
+                            <tr><th scope="row"><label for="dfss_tenant_id"><?php esc_html_e('Tenant ID', 'datafirefly-server-side'); ?></label></th>
                                 <td><input type="text" id="dfss_tenant_id" name="dfss_tenant_id" class="regular-text" value="<?php echo esc_attr($o['tenant_id']); ?>" /></td></tr>
-                            <tr><th scope="row"><label for="dfss_hmac_secret"><?php esc_html_e('HMAC secret', 'datafirefly-serverside'); ?></label></th>
-                                <td><input type="password" id="dfss_hmac_secret" name="dfss_hmac_secret" class="regular-text" value="" autocomplete="new-password" placeholder="<?php echo $o['hmac_secret'] !== '' ? esc_attr__('Configured. Leave empty to keep it.', 'datafirefly-serverside') : ''; ?>" /></td></tr>
-                            <tr><th scope="row"><label for="dfss_endpoint"><?php esc_html_e('Endpoint', 'datafirefly-serverside'); ?></label></th>
+                            <tr><th scope="row"><label for="dfss_hmac_secret"><?php esc_html_e('HMAC secret', 'datafirefly-server-side'); ?></label></th>
+                                <td><input type="password" id="dfss_hmac_secret" name="dfss_hmac_secret" class="regular-text" value="" autocomplete="new-password" placeholder="<?php echo $o['hmac_secret'] !== '' ? esc_attr__('Configured. Leave empty to keep it.', 'datafirefly-server-side') : ''; ?>" /></td></tr>
+                            <tr><th scope="row"><label for="dfss_endpoint"><?php esc_html_e('Endpoint', 'datafirefly-server-side'); ?></label></th>
                                 <td><input type="url" id="dfss_endpoint" name="dfss_endpoint" class="regular-text" value="<?php echo esc_attr($o['endpoint']); ?>" /></td></tr>
-                            <tr><th scope="row"><?php esc_html_e('Complete tracking', 'datafirefly-serverside'); ?></th>
-                                <td><label><input type="checkbox" name="dfss_complete_tracking" value="1" <?php checked(1, (int) $o['complete_tracking']); ?> /> <?php esc_html_e('Client + full funnel', 'datafirefly-serverside'); ?></label></td></tr>
-                            <tr><th scope="row"><?php esc_html_e('Require consent', 'datafirefly-serverside'); ?></th>
-                                <td><label><input type="checkbox" name="dfss_require_consent" value="1" <?php checked(1, (int) $o['require_consent']); ?> /> <?php esc_html_e('Gate on marketing consent', 'datafirefly-serverside'); ?></label></td></tr>
-                            <tr><th scope="row"><?php esc_html_e('Client destinations', 'datafirefly-serverside'); ?></th>
+                            <tr><th scope="row"><?php esc_html_e('Complete tracking', 'datafirefly-server-side'); ?></th>
+                                <td><label><input type="checkbox" name="dfss_complete_tracking" value="1" <?php checked(1, (int) $o['complete_tracking']); ?> /> <?php esc_html_e('Client + full funnel', 'datafirefly-server-side'); ?></label></td></tr>
+                            <tr><th scope="row"><?php esc_html_e('Require consent', 'datafirefly-server-side'); ?></th>
+                                <td><label><input type="checkbox" name="dfss_require_consent" value="1" <?php checked(1, (int) $o['require_consent']); ?> /> <?php esc_html_e('Gate on marketing consent', 'datafirefly-server-side'); ?></label></td></tr>
+                            <tr><th scope="row"><?php esc_html_e('Client destinations', 'datafirefly-server-side'); ?></th>
                                 <td>
                                     <label style="display:block;"><input type="checkbox" name="dfss_dest_meta" value="1" <?php checked(1, (int) $o['dest_meta']); ?> /> Meta</label>
                                     <label style="display:block;"><input type="checkbox" name="dfss_dest_ga4" value="1" <?php checked(1, (int) $o['dest_ga4']); ?> /> GA4</label>
@@ -1375,7 +1395,7 @@ class DFSS_Plugin
                                 </td></tr>
                             <?php $this->render_consent_fields($o); ?>
                         </table>
-                        <p><button type="submit" name="dfss_save" class="button"><?php esc_html_e('Save', 'datafirefly-serverside'); ?></button></p>
+                        <p><button type="submit" name="dfss_save" class="button"><?php esc_html_e('Save', 'datafirefly-server-side'); ?></button></p>
                     </form>
                 </div>
             <?php endif; ?>
@@ -1394,37 +1414,37 @@ class DFSS_Plugin
     private function render_consent_fields(array $o)
     {
         ?>
-                            <tr><th scope="row"><?php esc_html_e('Carry the ad click ID across pages', 'datafirefly-serverside'); ?></th>
+                            <tr><th scope="row"><?php esc_html_e('Carry the ad click ID across pages', 'datafirefly-server-side'); ?></th>
                                 <td>
                                     <input type="hidden" name="dfss_has_consent_fields" value="1" />
-                                    <label><input type="checkbox" name="dfss_clickid_passthrough" value="1" <?php checked(1, (int) ($o['clickid_passthrough'] ?? 1)); ?> /> <?php esc_html_e('Enabled', 'datafirefly-serverside'); ?></label>
-                                    <p class="description"><?php esc_html_e('A Google click ID only exists in the URL of the landing page. Without this, a shopper who arrives from an ad, browses, then accepts the banner has already lost it, and the sale can never be attributed. This carries it on your own internal links, in the URL only: nothing is written to the device, and it is never passed to another site. The cookie itself still waits for consent.', 'datafirefly-serverside'); ?></p>
+                                    <label><input type="checkbox" name="dfss_clickid_passthrough" value="1" <?php checked(1, (int) ($o['clickid_passthrough'] ?? 1)); ?> /> <?php esc_html_e('Enabled', 'datafirefly-server-side'); ?></label>
+                                    <p class="description"><?php esc_html_e('A Google click ID only exists in the URL of the landing page. Without this, a shopper who arrives from an ad, browses, then accepts the banner has already lost it, and the sale can never be attributed. This carries it on your own internal links, in the URL only: nothing is written to the device, and it is never passed to another site. The cookie itself still waits for consent.', 'datafirefly-server-side'); ?></p>
                                 </td></tr>
-                            <tr><th scope="row"><?php esc_html_e('Hold events until consent (minutes)', 'datafirefly-serverside'); ?></th>
+                            <tr><th scope="row"><?php esc_html_e('Hold events until consent (minutes)', 'datafirefly-server-side'); ?></th>
                                 <td>
                                     <input type="number" min="0" max="1440" step="1" name="dfss_consent_hold_minutes" value="<?php echo esc_attr((string) ($o['consent_hold_minutes'] ?? 0)); ?>" class="small-text" />
-                                    <p class="description"><?php esc_html_e('A shopper who has not yet answered the banner is not a shopper who refused. With a value above zero, their events wait IN THEIR OWN BROWSER for that many minutes: nothing reaches your shop or DataFirefly. If they accept, the events are sent. If they refuse, or the delay passes, they are discarded. An explicit refusal is never held, whatever the value. Zero disables it, and zero is the default: this is a compliance decision, not a technical setting. Ask your data protection officer.', 'datafirefly-serverside'); ?></p>
+                                    <p class="description"><?php esc_html_e('A shopper who has not yet answered the banner is not a shopper who refused. With a value above zero, their events wait IN THEIR OWN BROWSER for that many minutes: nothing reaches your shop or DataFirefly. If they accept, the events are sent. If they refuse, or the delay passes, they are discarded. An explicit refusal is never held, whatever the value. Zero disables it, and zero is the default: this is a compliance decision, not a technical setting. Ask your data protection officer.', 'datafirefly-server-side'); ?></p>
                                 </td></tr>
-                            <tr><th scope="row"><?php esc_html_e('Google consent mode', 'datafirefly-serverside'); ?></th>
+                            <tr><th scope="row"><?php esc_html_e('Google consent mode', 'datafirefly-server-side'); ?></th>
                                 <td>
                                     <select name="dfss_google_consent_mode">
-                                        <option value="basic" <?php selected('basic', (string) ($o['google_consent_mode'] ?? 'basic')); ?>><?php esc_html_e('Basic (nothing loads before consent)', 'datafirefly-serverside'); ?></option>
-                                        <option value="advanced" <?php selected('advanced', (string) ($o['google_consent_mode'] ?? 'basic')); ?>><?php esc_html_e('Advanced (Google tags load cookieless before consent)', 'datafirefly-serverside'); ?></option>
+                                        <option value="basic" <?php selected('basic', (string) ($o['google_consent_mode'] ?? 'basic')); ?>><?php esc_html_e('Basic (nothing loads before consent)', 'datafirefly-server-side'); ?></option>
+                                        <option value="advanced" <?php selected('advanced', (string) ($o['google_consent_mode'] ?? 'basic')); ?>><?php esc_html_e('Advanced (Google tags load cookieless before consent)', 'datafirefly-server-side'); ?></option>
                                     </select>
-                                    <p class="description"><?php esc_html_e('Basic is the default: no tag of any kind loads until the visitor accepts. Advanced loads the Google tags (GA4, Google Ads) as soon as the page opens, with consent denied: until the visitor accepts, they send cookieless pings (time, browser, referring page, consent state; the IP address is truncated) that Google uses to model the conversions and visits it cannot see. Meta, TikTok and every other platform still wait for consent. This is a compliance decision, not a technical setting: ask your data protection officer.', 'datafirefly-serverside'); ?></p>
+                                    <p class="description"><?php esc_html_e('Basic is the default: no tag of any kind loads until the visitor accepts. Advanced loads the Google tags (GA4, Google Ads) as soon as the page opens, with consent denied: until the visitor accepts, they send cookieless pings (time, browser, referring page, consent state; the IP address is truncated) that Google uses to model the conversions and visits it cannot see. Meta, TikTok and every other platform still wait for consent. This is a compliance decision, not a technical setting: ask your data protection officer.', 'datafirefly-server-side'); ?></p>
                                 </td></tr>
-                            <tr><th scope="row"><?php esc_html_e('Where consent is denied by default', 'datafirefly-serverside'); ?></th>
+                            <tr><th scope="row"><?php esc_html_e('Where consent is denied by default', 'datafirefly-server-side'); ?></th>
                                 <td>
                                     <select name="dfss_consent_default_region">
-                                        <option value="all" <?php selected('all', (string) ($o['consent_default_region'] ?? 'all')); ?>><?php esc_html_e('Everywhere', 'datafirefly-serverside'); ?></option>
-                                        <option value="eea" <?php selected('eea', (string) ($o['consent_default_region'] ?? 'all')); ?>><?php esc_html_e('EEA, United Kingdom and Switzerland only', 'datafirefly-serverside'); ?></option>
+                                        <option value="all" <?php selected('all', (string) ($o['consent_default_region'] ?? 'all')); ?>><?php esc_html_e('Everywhere', 'datafirefly-server-side'); ?></option>
+                                        <option value="eea" <?php selected('eea', (string) ($o['consent_default_region'] ?? 'all')); ?>><?php esc_html_e('EEA, United Kingdom and Switzerland only', 'datafirefly-server-side'); ?></option>
                                     </select>
-                                    <p class="description"><?php esc_html_e('Advanced mode only. With the second choice, visitors outside these countries are treated as consenting by the Google tags until they answer. Applies only when your consent tool does not already send Google its own default: if it does (Cookiebot, Complianz, DataFirefly Cookie Consent...), its default wins and this setting has no effect.', 'datafirefly-serverside'); ?></p>
+                                    <p class="description"><?php esc_html_e('Advanced mode only. With the second choice, visitors outside these countries are treated as consenting by the Google tags until they answer. Applies only when your consent tool does not already send Google its own default: if it does (Cookiebot, Complianz, DataFirefly Cookie Consent...), its default wins and this setting has no effect.', 'datafirefly-server-side'); ?></p>
                                 </td></tr>
-                            <tr><th scope="row"><?php esc_html_e('Hide the ad click ID while ads consent is denied', 'datafirefly-serverside'); ?></th>
+                            <tr><th scope="row"><?php esc_html_e('Hide the ad click ID while ads consent is denied', 'datafirefly-server-side'); ?></th>
                                 <td>
-                                    <label><input type="checkbox" name="dfss_ads_data_redaction" value="1" <?php checked(1, (int) ($o['ads_data_redaction'] ?? 1)); ?> /> <?php esc_html_e('Enabled', 'datafirefly-serverside'); ?></label>
-                                    <p class="description"><?php esc_html_e('Advanced mode only. Removes the Google click ID from the cookieless pings until the visitor accepts advertising. The most privacy-protective choice; Google says it can reduce modelling accuracy.', 'datafirefly-serverside'); ?></p>
+                                    <label><input type="checkbox" name="dfss_ads_data_redaction" value="1" <?php checked(1, (int) ($o['ads_data_redaction'] ?? 1)); ?> /> <?php esc_html_e('Enabled', 'datafirefly-server-side'); ?></label>
+                                    <p class="description"><?php esc_html_e('Advanced mode only. Removes the Google click ID from the cookieless pings until the visitor accepts advertising. The most privacy-protective choice; Google says it can reduce modelling accuracy.', 'datafirefly-server-side'); ?></p>
                                 </td></tr>
         <?php
     }
@@ -1441,43 +1461,43 @@ class DFSS_Plugin
         $pending = DFSS_Queue::count_pending();
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e('DataFirefly Activity', 'datafirefly-serverside'); ?></h1>
+            <h1><?php esc_html_e('DataFirefly Activity', 'datafirefly-server-side'); ?></h1>
 
             <p style="font-size:14px;margin:12px 0;">
                 <?php if ($this->is_connected()) : ?>
                     <span class="dashicons dashicons-yes-alt" style="color:#008D9E;"></span>
-                    <strong><?php esc_html_e('Connected', 'datafirefly-serverside'); ?></strong>
+                    <strong><?php esc_html_e('Connected', 'datafirefly-server-side'); ?></strong>
                 <?php else : ?>
                     <span class="dashicons dashicons-warning" style="color:#b32d2e;"></span>
-                    <strong><?php esc_html_e('Not connected', 'datafirefly-serverside'); ?></strong>
+                    <strong><?php esc_html_e('Not connected', 'datafirefly-server-side'); ?></strong>
                 <?php endif; ?>
                 &nbsp;|&nbsp;
                 <?php
                 /* translators: %d: number of events delivered in the last 24 hours. */
-                echo esc_html(sprintf(__('Delivered in last 24h: %d', 'datafirefly-serverside'), $count24));
+                echo esc_html(sprintf(__('Delivered in last 24h: %d', 'datafirefly-server-side'), $count24));
                 ?>
                 &nbsp;|&nbsp;
                 <?php
                 /* translators: %d: number of events currently queued for retry. */
-                echo esc_html(sprintf(__('Queued for retry: %d', 'datafirefly-serverside'), $pending));
+                echo esc_html(sprintf(__('Queued for retry: %d', 'datafirefly-server-side'), $pending));
                 ?>
             </p>
 
             <table class="widefat striped" style="max-width:1000px;">
                 <thead>
                     <tr>
-                        <th><?php esc_html_e('Time', 'datafirefly-serverside'); ?></th>
-                        <th><?php esc_html_e('Event', 'datafirefly-serverside'); ?></th>
-                        <th><?php esc_html_e('Source', 'datafirefly-serverside'); ?></th>
-                        <th><?php esc_html_e('Status', 'datafirefly-serverside'); ?></th>
-                        <th><?php esc_html_e('Detail', 'datafirefly-serverside'); ?></th>
+                        <th><?php esc_html_e('Time', 'datafirefly-server-side'); ?></th>
+                        <th><?php esc_html_e('Event', 'datafirefly-server-side'); ?></th>
+                        <th><?php esc_html_e('Source', 'datafirefly-server-side'); ?></th>
+                        <th><?php esc_html_e('Status', 'datafirefly-server-side'); ?></th>
+                        <th><?php esc_html_e('Detail', 'datafirefly-server-side'); ?></th>
                     </tr>
                 </thead>
                 <tbody id="dfss-activity-rows">
                     <?php echo $this->activity_rows_html(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- every value is escaped inside activity_rows_html(). ?>
                 </tbody>
             </table>
-            <p class="description" style="margin-top:8px;"><?php esc_html_e('Updates automatically every 30 seconds. The client side fires the browser pixel; the server side is the ad-blocker-proof delivery, and both share one event id for deduplication.', 'datafirefly-serverside'); ?></p>
+            <p class="description" style="margin-top:8px;"><?php esc_html_e('Updates automatically every 30 seconds. The client side fires the browser pixel; the server side is the ad-blocker-proof delivery, and both share one event id for deduplication.', 'datafirefly-server-side'); ?></p>
         </div>
         <?php
     }
@@ -1504,15 +1524,15 @@ class DFSS_Plugin
     {
         $rows = DFSS_Queue::recent(20);
         if (empty($rows)) {
-            return '<tr><td colspan="5">' . esc_html__('No events yet.', 'datafirefly-serverside') . '</td></tr>';
+            return '<tr><td colspan="5">' . esc_html__('No events yet.', 'datafirefly-server-side') . '</td></tr>';
         }
 
         $labels = array(
-            DFSS_Queue::STATUS_DONE => __('Delivered', 'datafirefly-serverside'),
-            DFSS_Queue::STATUS_PENDING => __('Queued (retry)', 'datafirefly-serverside'),
-            DFSS_Queue::STATUS_SENDING => __('Retrying', 'datafirefly-serverside'),
-            DFSS_Queue::STATUS_FAILED => __('Rejected', 'datafirefly-serverside'),
-            DFSS_Queue::STATUS_DROPPED => __('Gave up', 'datafirefly-serverside'),
+            DFSS_Queue::STATUS_DONE => __('Delivered', 'datafirefly-server-side'),
+            DFSS_Queue::STATUS_PENDING => __('Queued (retry)', 'datafirefly-server-side'),
+            DFSS_Queue::STATUS_SENDING => __('Retrying', 'datafirefly-server-side'),
+            DFSS_Queue::STATUS_FAILED => __('Rejected', 'datafirefly-server-side'),
+            DFSS_Queue::STATUS_DROPPED => __('Gave up', 'datafirefly-server-side'),
         );
         $colors = array(
             DFSS_Queue::STATUS_DONE => '#008D9E',
@@ -1531,13 +1551,13 @@ class DFSS_Plugin
             $detail = $r->last_code ? ('HTTP ' . (int) $r->last_code) : '';
             if ((int) $r->attempts > 1) {
                 /* translators: %d: number of delivery attempts for this event. */
-                $detail .= ' · ' . sprintf(__('%d attempts', 'datafirefly-serverside'), (int) $r->attempts);
+                $detail .= ' · ' . sprintf(__('%d attempts', 'datafirefly-server-side'), (int) $r->attempts);
             }
 
             $html .= '<tr>';
             $html .= '<td>' . esc_html($time) . '</td>';
             $html .= '<td><code>' . esc_html($r->event_name) . '</code></td>';
-            $html .= '<td>' . esc_html($r->origin === 'beacon' ? __('client beacon', 'datafirefly-serverside') : __('server', 'datafirefly-serverside')) . '</td>';
+            $html .= '<td>' . esc_html($r->origin === 'beacon' ? __('client beacon', 'datafirefly-server-side') : __('server', 'datafirefly-server-side')) . '</td>';
             // Underline + bold in addition to colour (accessibility — never colour alone).
             $html .= '<td><strong style="color:' . esc_attr($color) . ';text-decoration:underline;">' . esc_html($label) . '</strong></td>';
             $html .= '<td>' . esc_html($detail) . '</td>';
@@ -1553,3 +1573,4 @@ register_activation_hook(__FILE__, array('DFSS_Plugin', 'activate'));
 register_deactivation_hook(__FILE__, array('DFSS_Plugin', 'deactivate'));
 
 new DFSS_Plugin();
+DFSS_Legacy::register();
