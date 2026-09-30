@@ -8,8 +8,8 @@
  * @package DataFirefly_ServerSide
  */
 
-// Loaded by WordPress, or by the standalone test on the command line.
-if (!defined('ABSPATH') && PHP_SAPI !== 'cli') {
+// The standalone test defines ABSPATH itself before loading this file.
+if (!defined('ABSPATH')) {
     exit;
 }
 

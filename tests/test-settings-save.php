@@ -11,6 +11,8 @@
  *
  * Run: php tests/test-settings-save.php
  */
+// Every plugin file refuses to run outside WordPress; this test stands in.
+define('ABSPATH', __DIR__ . '/');
 require __DIR__ . '/../includes/class-dfss-settings.php';
 
 $ok = 0;

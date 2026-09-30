@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.26.0
+Stable tag: 2.26.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -58,6 +58,9 @@ Only for the destinations that are both configured on your DataFirefly account *
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.26.1 =
+* Housekeeping, no change to what the plugin does. The package passes the WordPress Plugin Check with no error: the .htaccess file is no longer shipped (hidden files are not allowed in the plugin directory; every PHP file already refuses direct access), and the settings helper uses the standard direct-access guard. The shared consent code and the design stylesheet carry their licence header.
 
 = 2.26.0 =
 * New: optional Google Consent Mode "advanced" (off by default). Before consent, only the Google tags load, cookieless, for Google's modelling; Meta, TikTok and every other platform still wait for consent. Once the visitor accepts, measurement goes through the server as before, so ad blockers do not take it away. A purchase is sent to GA4 by the browser only when the server did not send it.
