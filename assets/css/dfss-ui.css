@@ -4,6 +4,10 @@
  * console et les trois plugins par scripts/sync-design.py. Ne pas editer les
  * copies. Tout vit sous .dfss-ui : rien ne deborde sur l'ecran d'accueil.
  * Couleurs : uniquement par variables (tokens.json), jamais en dur.
+ *
+ * @author    DataFirefly Ltd
+ * @copyright DataFirefly Ltd
+ * @license   Proprietary
  */
 
 /* ---- DFSS-TOKENS:BEGIN (genere depuis tokens.json, ne pas editer) ---- */

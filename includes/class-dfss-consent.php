@@ -262,10 +262,10 @@ class DFSS_Consent
     /**
      * Marketing consent as the CMP wrote it into a cookie.
      *
-     * @param array $cookies Usually $_COOKIE, or the framework's cookie bag.
+     * @param mixed $cookies usually $_COOKIE, or the framework's cookie bag
      *
      * @return bool|null true/false when a tool we understand answered, null
-     *                   when none of them is present.
+     *                   when none of them is present
      */
     public static function dfssCmpFromCookies($cookies)
     {
@@ -328,7 +328,7 @@ class DFSS_Consent
         if ($v !== '') {
             $v = urldecode($v);
             if (preg_match('/marketing["\']?\s*:\s*["\']?(true|1|false|0)/i', $v, $m)) {
-                return in_array(strtolower($m[1]), array('true', '1'), true);
+                return in_array(strtolower($m[1]), ['true', '1'], true);
             }
         }
 
@@ -342,6 +342,7 @@ class DFSS_Consent
                     : $json;
                 if (array_key_exists('marketing', $consents)) {
                     $marketing = $consents['marketing'];
+
                     return !empty($marketing);
                 }
             }
