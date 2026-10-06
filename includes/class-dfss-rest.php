@@ -296,9 +296,12 @@ class DFSS_REST
      */
     private function sanitize_browser_sent(array $body)
     {
-        $in = isset($body['browser_sent']) && is_array($body['browser_sent']) ? $body['browser_sent'] : array();
+        // Strings only: the body is attacker-controlled, and strval() on a nested array raises a PHP warning.
+        $in = isset($body['browser_sent']) && is_array($body['browser_sent'])
+            ? array_filter($body['browser_sent'], 'is_string')
+            : array();
 
-        return array_values(array_intersect(array('ga4'), array_map('strval', $in)));
+        return array_values(array_intersect(array('ga4'), $in));
     }
 
     /**
