@@ -1083,8 +1083,35 @@
 			if (typeof d.orderId === 'string' && d.orderId !== '') {
 				p.transaction_id = d.orderId;
 			}
+			if (typeof d.searchString === 'string' && d.searchString !== '') {
+				p.search_term = d.searchString;
+			}
+			if (typeof d.listId === 'string' && d.listId !== '') {
+				p.item_list_id = d.listId;
+			}
+			if (typeof d.listName === 'string' && d.listName !== '') {
+				p.item_list_name = d.listName;
+			}
 			if (d.items && typeof d.items.length === 'number' && d.items.length) {
 				p.items = Array.prototype.slice.call(d.items, 0, 200);
+			} else if (Object.prototype.toString.call(d.products) === '[object Array]') {
+				// The server event names its lines "products"; GA4 calls them "items".
+				var items = [];
+				for (var i = 0; i < d.products.length && items.length < 200; i++) {
+					var pr = d.products[i];
+					if (!pr || pr.id === undefined || pr.id === null || pr.id === '') {
+						continue;
+					}
+					var it = { item_id: String(pr.id) };
+					if (typeof pr.name === 'string' && pr.name !== '') { it.item_name = pr.name; }
+					if (typeof pr.price === 'number' && isFinite(pr.price)) { it.price = pr.price; }
+					if (typeof pr.quantity === 'number' && isFinite(pr.quantity)) { it.quantity = pr.quantity; }
+					if (typeof pr.category === 'string' && pr.category !== '') { it.item_category = pr.category; }
+					items.push(it);
+				}
+				if (items.length) {
+					p.items = items;
+				}
 			}
 
 			return p;
