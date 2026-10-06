@@ -170,7 +170,7 @@ class DFSS_Consent
         );
     }
 
-    // ---- DFSS-CONSENT-COOKIES:BEGIN (genere — ne pas editer ici) --------
+    // ---- DFSS-CONSENT-COOKIES:BEGIN (generated — do not edit here) --------
     // ---------------------------------------------------------------------
     // Shared server-side consent detection.
     //

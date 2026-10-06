@@ -406,7 +406,7 @@
 		return u;
 	}
 
-	// ---- DFSS-CONSENT-CORE:BEGIN (genere — ne pas editer ici) --------------
+	// ---- DFSS-CONSENT-CORE:BEGIN (generated — do not edit here) --------------
 	/**
 	 * Marketing-consent detection, shared verbatim by the three storefront
 	 * trackers (WooCommerce, PrestaShop, Shopware).
@@ -638,13 +638,13 @@
 			},
 		];
 
-		// ---- mesure d'audience (analytics_storage) ------------------------------
+		// ---- audience measurement (analytics_storage) ---------------------------
 		//
-		// Un second signal, lu a part, qui ne sert QU'AU mode avance de Google
-		// Consent Mode (analytics_storage). Il ne decide jamais d'aucun envoi : le
-		// seul verdict qui ouvre Meta, TikTok, OpenAI ou le dispatcher reste
-		// granted(). Un outil dont on ne connait pas la categorie mesure repond
-		// null, donc refuse : GA4 recoit alors son ping sans cookies, rien de plus.
+		// A second signal, read separately, used ONLY by Google Consent Mode's
+		// advanced mode (analytics_storage). It never decides any send: the only
+		// verdict that opens Meta, TikTok, OpenAI or the dispatcher stays
+		// granted(). A tool whose measurement category is unknown answers null,
+		// hence denied: GA4 then gets its cookieless ping, nothing more.
 		var ANALYTICS_PROBES = [
 			function () {
 				if (window.dfcc && typeof window.dfcc.hasConsent === 'function') {
@@ -652,8 +652,8 @@
 				}
 				return null;
 			},
-			// TCF : 8 = mesurer la performance des contenus, 9 = comprendre les
-			// audiences par des statistiques. Les deux, par prudence.
+			// TCF: 8 = measure content performance, 9 = understand audiences
+			// through statistics. Both, to be safe.
 			function () {
 				if (typeof window.__tcfapi !== 'function') {
 					return null;
@@ -685,7 +685,7 @@
 				} catch (e) {}
 				return null;
 			},
-			// Iubenda : la finalite 5 est « Mesure ».
+			// Iubenda: purpose 5 is "Measurement".
 			function () {
 				try {
 					if (window._iub && window._iub.cs && window._iub.cs.consent && window._iub.cs.consent.purposes) {
@@ -694,7 +694,7 @@
 				} catch (e) {}
 				return null;
 			},
-			// OneTrust : C0002 est « Performance Cookies » dans tous leurs modeles.
+			// OneTrust: C0002 is "Performance Cookies" in all their templates.
 			function () {
 				try {
 					var groups = window.OnetrustActiveGroups || window.OptanonActiveGroups;
@@ -839,7 +839,7 @@
 			return out;
 		}
 
-		/** tarteaucitron, cote mesure : memes regles que tarteaucitron(). */
+		/** tarteaucitron, measurement side: same rules as tarteaucitron(). */
 		function tarteaucitronAnalytics(opts) {
 			var jobs = (opts && opts.analyticsJobs) || ['gtag', 'analytics', 'gajs'];
 			var i;
@@ -963,31 +963,30 @@
 		return { granted: granted, analytics: analytics, bind: bind };
 	})();
 	// ---- DFSS-CONSENT-CORE:END ---------------------------------------------
-	// ---- DFSS-CONSENT-MODE:BEGIN (genere — ne pas editer ici) --------------
+	// ---- DFSS-CONSENT-MODE:BEGIN (generated — do not edit here) --------------
 	/**
-	 * Google Consent Mode, variante AVANCEE, partagee mot pour mot par les trois
-	 * traqueurs (WooCommerce, PrestaShop, Shopware).
+	 * Google Consent Mode, ADVANCED variant, shared word for word by the three
+	 * trackers (WooCommerce, PrestaShop, Shopware).
 	 *
-	 * Mode avance : les balises Google (GA4, Google Ads) se chargent des
-	 * l'arrivee du visiteur, en refus par defaut, et envoient des pings sans
-	 * cookies tant qu'il n'a pas accepte. Google s'en sert pour modeliser ce
-	 * qu'il ne voit pas. RIEN D'AUTRE ne change : Meta, TikTok, OpenAI et le
-	 * dispatcher restent derriere le consentement marketing.
+	 * Advanced mode: the Google tags (GA4, Google Ads) load as soon as the visitor
+	 * arrives, denied by default, and send cookieless pings until they accept.
+	 * Google uses them to model what it cannot see. NOTHING ELSE changes: Meta,
+	 * TikTok, OpenAI and the dispatcher stay behind the marketing consent.
 	 *
-	 * Option du marchand, eteinte par defaut. C'est une decision de conformite :
-	 * un ping sans cookies contient l'heure, le user-agent, la page d'origine et
-	 * l'etat du consentement. Spec : SPEC-MODE-AVANCE-CONSENTEMENT-2026-09-29.
+	 * A merchant option, off by default. It is a compliance decision: a cookieless
+	 * ping carries the time, the user agent, the referring page and the consent
+	 * state. Spec: SPEC-MODE-AVANCE-CONSENTEMENT-2026-09-29.
 	 *
-	 * La regle qui empeche le double comptage GA4 vit ici et nulle part ailleurs :
-	 *   navigation  -> la balise GA4 tant que le visiteur n'a PAS accepte (pings
-	 *                  sans cookies), et l'envoi au dispatcher, s'il part plus tard,
-	 *                  porte browser_sent ; des qu'il a accepte, le serveur seul,
-	 *                  comme en mode de base (resistant aux bloqueurs) ;
-	 *   achat       -> la balise GA4 SEULEMENT si la commande a ete refusee
-	 *                  (le serveur n'envoie rien dans ce cas), sinon le serveur seul.
+	 * The rule that prevents GA4 double counting lives here and nowhere else:
+	 *   browsing  -> the GA4 tag while the visitor has NOT accepted (cookieless
+	 *                pings), and the dispatcher send, if it leaves later, carries
+	 *                browser_sent; once they have accepted, the server alone, as in
+	 *                basic mode (ad-blocker proof);
+	 *   purchase  -> the GA4 tag ONLY if the order was refused (the server sends
+	 *                nothing in that case), otherwise the server alone.
 	 *
-	 * Genere dans les trois traqueurs par scripts/sync-consent-core.py.
-	 * Ne pas editer les copies.
+	 * Generated into the three trackers by scripts/sync-consent-core.py.
+	 * Do not edit the copies.
 	 */
 	var DFSS_CM = (function () {
 		'use strict';
@@ -999,7 +998,7 @@
 			'SI', 'ES', 'SE', 'IS', 'LI', 'NO', 'GB', 'CH'
 		];
 
-		/** Actif seulement si le marchand l'a choisi ET qu'une balise Google existe. */
+		/** Active only if the merchant chose it AND a Google tag exists. */
 		function isAdvanced(consent, pub) {
 			if (!consent || consent.googleMode !== 'advanced') {
 				return false;
@@ -1025,7 +1024,7 @@
 			return o;
 		}
 
-		/** On ne dit a Google que ce qu'on sait. Un signal null n'est pas envoye. */
+		/** Tell Google only what we know. A null signal is not sent. */
 		function updateCommand(ads, analytics) {
 			var o = {};
 			if (ads === true || ads === false) {
@@ -1042,16 +1041,16 @@
 		}
 
 		/**
-		 * Un outil de consentement a-t-il deja pose son defaut ? Beaucoup le font
-		 * (Cookiebot, Complianz, df-cookie-consent...). Deux sources d'ordres
-		 * peuvent se contredire : si l'outil parle deja a Google, on le laisse
-		 * parler seul. Verifie sur banc avant ecriture (spec V1).
+		 * Has a consent tool already set its default? Many do (Cookiebot,
+		 * Complianz, df-cookie-consent...). Two sources of orders can contradict
+		 * each other: if the tool already talks to Google, let it talk alone.
+		 * Checked on the bench before writing (spec V1).
 		 */
 		function hasConsentDefault(dl, gtd) {
-			// Un outil pose dans GTM passe par l'API de consentement de GTM, qui
-			// n'ecrit pas dans le dataLayer. google_tag_data.ics.usedDefault le
-			// dit : false sans defaut, true apres (mesure sur banc le 29/09).
-			// Objet interne de Google : s'il disparait, on retombe sur le dataLayer.
+			// A tool set up in GTM goes through GTM's consent API, which does not
+			// write to the dataLayer. google_tag_data.ics.usedDefault tells us:
+			// false without a default, true after (measured on the bench on 29/09).
+			// Internal Google object: if it disappears, fall back on the dataLayer.
 			try {
 				if (gtd && gtd.ics && gtd.ics.usedDefault === true) {
 					return true;
@@ -1092,10 +1091,10 @@
 		}
 
 		/**
-		 * Le verdict est celui ENREGISTRE SUR LA COMMANDE, ecrit dans la page par le
-		 * plugin. Le serveur envoie l'achat pour tout sauf 'denied'. Un verdict
-		 * absent (ancienne commande, plugin partiel) laisse l'achat au serveur :
-		 * au pire on perd une modelisation, jamais on ne compte double.
+		 * The verdict is the one RECORDED ON THE ORDER, written into the page by the
+		 * plugin. The server sends the purchase for everything but 'denied'. A
+		 * missing verdict (old order, partial plugin) leaves the purchase to the
+		 * server: at worst a modelling is lost, never a double count.
 		 */
 		function ga4FromBrowserForPurchase(verdict) {
 			return verdict === 'denied';
@@ -1140,13 +1139,12 @@
 			if (name === 'purchase' && !ga4FromBrowserForPurchase(verdict)) {
 				toGa4 = false;
 			}
-			// Un visiteur qui a deja accepte est mesure par le serveur, comme en
-			// mode de base. Un bloqueur de publicite coupe gtag.js mais pas l'envoi
-			// a la boutique : si la balise marquait cet evenement comme envoye, le
-			// dispatcher sauterait GA4 et l'evenement n'arriverait par aucun des
-			// deux chemins (relecture du 29/09). La balise ne porte que les pings
-			// sans cookies de ceux qui n'ont pas (encore) accepte ; l'achat, lui,
-			// suit le verdict de la commande.
+			// A visitor who has already accepted is measured by the server, as in
+			// basic mode. An ad blocker cuts gtag.js but not the send to the shop:
+			// if the tag marked this event as sent, the dispatcher would skip GA4
+			// and the event would arrive by neither path (review of 29/09). The tag
+			// only carries the cookieless pings of those who have not (yet)
+			// accepted; the purchase follows the order's verdict.
 			if (name !== 'purchase' && env.adsState() === true) {
 				toGa4 = false;
 			}

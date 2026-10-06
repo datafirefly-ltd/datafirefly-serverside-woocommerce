@@ -1,16 +1,16 @@
 /*
- * dfss-ui.css : fondations du design Server-Side (v1.0.0).
- * Source unique : datafirefly-server-side/shared/design/. Recopiee dans la
- * console et les trois plugins par scripts/sync-design.py. Ne pas editer les
- * copies. Tout vit sous .dfss-ui : rien ne deborde sur l'ecran d'accueil.
- * Couleurs : uniquement par variables (tokens.json), jamais en dur.
+ * dfss-ui.css: Server-Side design foundations (v1.0.0).
+ * Single source: datafirefly-server-side/shared/design/. Copied into the
+ * console and the three plugins by scripts/sync-design.py. Do not edit the
+ * copies. Everything lives under .dfss-ui: nothing leaks onto the host screen.
+ * Colours: through variables only (tokens.json), never hard-coded.
  *
  * @author    DataFirefly Ltd
  * @copyright DataFirefly Ltd
  * @license   Proprietary
  */
 
-/* ---- DFSS-TOKENS:BEGIN (genere depuis tokens.json, ne pas editer) ---- */
+/* ---- DFSS-TOKENS:BEGIN (generated from tokens.json, do not edit) ---- */
 .dfss-ui {
   --dfss-radius-chip: 8px;
   --dfss-radius-banner: 12px;
@@ -127,7 +127,7 @@
 }
 /* ---- DFSS-TOKENS:END ---- */
 
-/* Racine */
+/* Root */
 .dfss-ui {
   font-family: var(--dfss-font);
   font-size: var(--dfss-text-body);
@@ -144,7 +144,7 @@
   outline-offset: 2px;
 }
 
-/* Icone (sprite dfss-icons.svg) */
+/* Icon (dfss-icons.svg sprite) */
 .dfss-ui .dfss-icon {
   width: 20px;
   height: 20px;
@@ -157,7 +157,7 @@
   vertical-align: -4px;
 }
 
-/* 1. En-tete de marque */
+/* 1. Brand header */
 .dfss-ui .dfss-brand {
   display: flex;
   align-items: center;
@@ -189,7 +189,7 @@
   margin-left: auto;
 }
 
-/* 2. Bandeau d'etat : icone + titre + detail (+ action) */
+/* 2. Status banner: icon + title + detail (+ action) */
 .dfss-ui .dfss-banner {
   display: flex;
   align-items: center;
@@ -225,7 +225,7 @@
   color: var(--dfss-info-ink);
 }
 
-/* 3. Puce d'etat : icone + libelle */
+/* 3. Status pill: icon + label */
 .dfss-ui .dfss-chip {
   display: inline-flex;
   align-items: center;
@@ -262,7 +262,7 @@
   color: var(--dfss-neutral-ink);
 }
 
-/* 4. Carte de section */
+/* 4. Section card */
 .dfss-ui .dfss-card {
   background: var(--dfss-surface);
   border: 1px solid var(--dfss-line);
@@ -288,13 +288,13 @@
   margin-top: var(--dfss-space-4);
 }
 
-/* Lien « En savoir plus » : souligne, jamais la couleur seule */
+/* "Learn more" link: underlined, never colour alone */
 .dfss-ui .dfss-link {
   color: var(--dfss-link);
   text-decoration: underline;
 }
 
-/* 5. Choix en cartes */
+/* 5. Card choices */
 .dfss-ui .dfss-choice {
   display: flex;
   gap: var(--dfss-space-3);
@@ -336,11 +336,11 @@
   outline-offset: 2px;
 }
 
-/* 6. Bouton segmente
- * Balisage : un groupe de <button aria-pressed="true|false"> contenant chacun
- * <svg class="dfss-icon"><use href="#dfss-check"/></svg> puis le libelle.
- * L'option choisie montre la coche : l'etat ne repose jamais sur la couleur
- * seule. Pas d'overflow:hidden, sinon le contour de focus est coupe. */
+/* 6. Segmented button
+ * Markup: a group of <button aria-pressed="true|false">, each holding
+ * <svg class="dfss-icon"><use href="#dfss-check"/></svg> then the label.
+ * The chosen option shows the check mark: the state never relies on colour
+ * alone. No overflow:hidden, or the focus outline gets cut. */
 .dfss-ui .dfss-segmented {
   display: inline-flex;
   border: 1px solid var(--dfss-control-line);
@@ -394,7 +394,7 @@
   font-weight: 600;
 }
 
-/* 7. Ligne de reglage */
+/* 7. Setting row */
 .dfss-ui .dfss-setting {
   display: flex;
   flex-wrap: wrap;
@@ -412,7 +412,7 @@
   color: var(--dfss-ink-2);
 }
 
-/* 8. Tableau d'activite */
+/* 8. Activity table */
 .dfss-ui .dfss-table {
   width: 100%;
   border-collapse: collapse;
@@ -430,7 +430,7 @@
   font-weight: 600;
 }
 
-/* 9. Etat vide */
+/* 9. Empty state */
 .dfss-ui .dfss-empty {
   text-align: center;
   padding: var(--dfss-space-6) var(--dfss-space-4);
@@ -442,7 +442,7 @@
   margin: var(--dfss-space-1) 0;
 }
 
-/* 10. Chargement */
+/* 10. Loading */
 .dfss-ui .dfss-skeleton {
   display: block;
   height: 12px;
@@ -451,7 +451,7 @@
   margin: var(--dfss-space-2) 0;
 }
 
-/* 11. Boutons (console ; dans les plugins, boutons natifs) */
+/* 11. Buttons (console; in the plugins, native buttons) */
 .dfss-ui .dfss-btn {
   display: inline-flex;
   white-space: nowrap;
