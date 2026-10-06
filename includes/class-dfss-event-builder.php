@@ -12,6 +12,13 @@ class DFSS_Event_Builder
      * Events the public beacon endpoint accepts. No 'purchase': it is sent server-side from the
      * order hook, so it cannot be spoofed. The tracker reads this list and beacons nothing else.
      *
+     * The events this list leaves out are NOT sent to the dispatcher ON PURPOSE (view_cart, contact, share,
+     * add_to_wishlist, start_trial and the like): the dispatcher counts every event it receives against the
+     * account's monthly quota, and each of these would also boot WordPress for a request the dispatcher can
+     * only forward to GA4 and Meta, which the browser tags already receive. The dispatcher itself accepts
+     * any snake_case name, so extending this list is a decision about volume and cost, not about what is
+     * technically possible.
+     *
      * @var string[]
      */
     const BEACON_EVENTS = array(
