@@ -1,0 +1,392 @@
+# Copyright (C) 2026 DataFirefly Ltd
+# This file is distributed under the GPLv2 or later.
+msgid ""
+msgstr ""
+"Project-Id-Version: DataFirefly Server-Side\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/datafirefly-server-side\n"
+"Last-Translator: DataFirefly Ltd\n"
+"Language-Team: Dutch\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-10-06T18:29:03+00:00\n"
+"PO-Revision-Date: 2026-10-06 00:00+0000\n"
+"X-Generator: WP-CLI 2.12.0\n"
+"Language: nl_NL\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Domain: datafirefly-server-side\n"
+
+#. Plugin Name of the plugin
+#: datafirefly-server-side.php
+msgid "DataFirefly Server-Side"
+msgstr ""
+
+#. Description of the plugin
+#: datafirefly-server-side.php
+msgid "Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser."
+msgstr "Volledige WooCommerce-tracking: browser + server, volledige funnel, ontdubbeld, AVG-bewust, betrouwbaar. Eén sleutel configureert alles; geen inloggegevens van bestemmingen bereiken ooit de browser."
+
+#. Author of the plugin
+#: datafirefly-server-side.php
+msgid "DataFirefly Ltd"
+msgstr ""
+
+#. Author URI of the plugin
+#: datafirefly-server-side.php
+msgid "https://datafirefly.com"
+msgstr ""
+
+#: datafirefly-server-side.php:162
+msgid "Every 5 minutes (DataFirefly retry)"
+msgstr "Elke 5 minuten (DataFirefly-nieuwe poging)"
+
+#: datafirefly-server-side.php:807
+#: datafirefly-server-side.php:808
+#: datafirefly-server-side.php:1322
+msgid "DataFirefly Activity"
+msgstr "DataFirefly-activiteit"
+
+#: datafirefly-server-side.php:923
+msgid "That connection key is not valid. Copy it again from your DataFirefly client space."
+msgstr "Deze verbindingssleutel is niet geldig. Kopieer hem opnieuw uit uw DataFirefly-klantomgeving."
+
+#: datafirefly-server-side.php:954
+msgid "Disconnected."
+msgstr "Losgekoppeld."
+
+#: datafirefly-server-side.php:967
+msgid "Tracking settings saved."
+msgstr "Trackinginstellingen opgeslagen."
+
+#: datafirefly-server-side.php:976
+msgid "Destination ids refreshed."
+msgstr "Bestemmings-ID's vernieuwd."
+
+#. translators: %d: HTTP status code returned by the dispatcher.
+#: datafirefly-server-side.php:979
+#, php-format
+msgid "Could not refresh destination ids (HTTP %d)."
+msgstr "De bestemmings-ID's konden niet worden vernieuwd (HTTP %d)."
+
+#: datafirefly-server-side.php:992
+msgid "The HMAC secret contains characters that are not part of a DataFirefly secret. Copy it again from your client space."
+msgstr "Het HMAC-geheim bevat tekens die geen deel uitmaken van een DataFirefly-geheim. Kopieer het opnieuw uit uw klantomgeving."
+
+#: datafirefly-server-side.php:1003
+msgid "The endpoint must be a valid https:// URL. Settings were not saved."
+msgstr "Het eindpunt moet een geldige https://-URL zijn. De instellingen zijn niet opgeslagen."
+
+#: datafirefly-server-side.php:1024
+msgid "Settings saved."
+msgstr "Instellingen opgeslagen."
+
+#: datafirefly-server-side.php:1061
+msgid "Connected! Your shop is live, a test event just reached DataFirefly."
+msgstr "Verbonden! Uw winkel is live, een testgebeurtenis heeft DataFirefly zojuist bereikt."
+
+#. translators: %s: comma-separated list of destinations (e.g. Meta, GA4, TikTok).
+#: datafirefly-server-side.php:1066
+#, php-format
+msgid "Client tags will load for: %s."
+msgstr "Client-tags worden geladen voor: %s."
+
+#. translators: %d: HTTP status code returned by the dispatcher.
+#: datafirefly-server-side.php:1072
+#, php-format
+msgid "Connected, but the test was rejected (HTTP %d). Ask your DataFirefly operator to check your tenant is active."
+msgstr "Verbonden, maar de test is geweigerd (HTTP %d). Vraag uw DataFirefly-operator te controleren of uw tenant actief is."
+
+#. translators: %d: HTTP status code returned by the dispatcher.
+#: datafirefly-server-side.php:1080
+#, php-format
+msgid "Test event delivered (HTTP %d)."
+msgstr "Testgebeurtenis afgeleverd (HTTP %d)."
+
+#. translators: %d: HTTP status code returned by the dispatcher.
+#: datafirefly-server-side.php:1083
+#, php-format
+msgid "Reached DataFirefly (HTTP %d): a destination rejected the test event. Your connection is fine."
+msgstr "DataFirefly is bereikt (HTTP %d): een bestemming heeft de testgebeurtenis geweigerd. Uw verbinding is in orde."
+
+#. translators: 1: HTTP status code, 2: error message from the dispatcher.
+#: datafirefly-server-side.php:1086
+#, php-format
+msgid "Test failed: HTTP %1$d, %2$s"
+msgstr "Test mislukt: HTTP %1$d, %2$s"
+
+#: datafirefly-server-side.php:1127
+#: datafirefly-server-side.php:1327
+msgid "Connected"
+msgstr "Verbonden"
+
+#: datafirefly-server-side.php:1128
+msgid "tracking is sent to"
+msgstr "tracking wordt verzonden naar"
+
+#. translators: %s: comma-separated list of destinations (e.g. Meta, GA4, TikTok).
+#: datafirefly-server-side.php:1134
+#, php-format
+msgid "Client tags: %s."
+msgstr "Client-tags: %s."
+
+#: datafirefly-server-side.php:1144
+#: datafirefly-server-side.php:1220
+msgid "Complete tracking"
+msgstr "Volledige tracking"
+
+#: datafirefly-server-side.php:1148
+msgid "Inject the light client tags and track the full funnel (page view, product view, add to cart, checkout, purchase). Recommended."
+msgstr "Voegt de lichte client-tags toe en volgt de volledige funnel (paginaweergave, productweergave, toevoegen aan winkelwagen, afrekenen, aankoop). Aanbevolen."
+
+#: datafirefly-server-side.php:1150
+msgid "When off, only the server-side purchase event is sent (v1 behaviour)."
+msgstr "Indien uit, wordt alleen de aankoopgebeurtenis van de server verzonden (gedrag van v1)."
+
+#: datafirefly-server-side.php:1154
+#: datafirefly-server-side.php:1222
+msgid "Require consent"
+msgstr "Toestemming vereisen"
+
+#: datafirefly-server-side.php:1158
+msgid "Do not fire anything until marketing consent is granted. Detected without configuration: WP Consent API, Complianz, DataFirefly Cookie Consent, Cookiebot, IAB TCF v2, Didomi, Usercentrics, CookieYes, Iubenda, OneTrust, Cookiehub, Osano, Borlabs, Klaro, tarteaucitron."
+msgstr "Niets activeren totdat de marketingtoestemming is verleend. Zonder configuratie herkend: WP Consent API, Complianz, DataFirefly Cookie Consent, Cookiebot, IAB TCF v2, Didomi, Usercentrics, CookieYes, Iubenda, OneTrust, Cookiehub, Osano, Borlabs, Klaro, tarteaucitron."
+
+#: datafirefly-server-side.php:1161
+msgid "Tip: install the WP Consent API plugin for the most reliable consent signal."
+msgstr "Tip: installeer de plugin WP Consent API voor het meest betrouwbare toestemmingssignaal."
+
+#: datafirefly-server-side.php:1168
+msgid "Save settings"
+msgstr "Instellingen opslaan"
+
+#: datafirefly-server-side.php:1172
+msgid "View activity"
+msgstr "Activiteit bekijken"
+
+#: datafirefly-server-side.php:1179
+msgid "Send test event"
+msgstr "Testgebeurtenis verzenden"
+
+#: datafirefly-server-side.php:1183
+msgid "Refresh destination ids"
+msgstr "Bestemmings-ID's vernieuwen"
+
+#: datafirefly-server-side.php:1185
+msgid "Disconnect this shop from DataFirefly?"
+msgstr "Deze winkel loskoppelen van DataFirefly?"
+
+#: datafirefly-server-side.php:1187
+msgid "Disconnect"
+msgstr "Loskoppelen"
+
+#: datafirefly-server-side.php:1192
+msgid "Connect your shop"
+msgstr "Uw winkel verbinden"
+
+#: datafirefly-server-side.php:1193
+msgid "Paste the connection key from your DataFirefly client space (Connect your shop). That is the only step: we configure client and server tracking for you."
+msgstr "Plak de verbindingssleutel uit uw DataFirefly-klantomgeving (Uw winkel verbinden). Dat is de enige stap: wij configureren de tracking aan client- en serverzijde voor u."
+
+#: datafirefly-server-side.php:1200
+msgid "Connect"
+msgstr "Verbinden"
+
+#: datafirefly-server-side.php:1206
+msgid "Advanced: enter credentials manually"
+msgstr "Geavanceerd: inloggegevens handmatig invoeren"
+
+#: datafirefly-server-side.php:1212
+msgid "Enable"
+msgstr "Inschakelen"
+
+#: datafirefly-server-side.php:1214
+msgid "Tenant ID"
+msgstr "Tenant-ID"
+
+#: datafirefly-server-side.php:1216
+msgid "HMAC secret"
+msgstr "HMAC-geheim"
+
+#: datafirefly-server-side.php:1217
+msgid "Configured. Leave empty to keep it."
+msgstr "Geconfigureerd. Laat leeg om het te behouden."
+
+#: datafirefly-server-side.php:1218
+msgid "Endpoint"
+msgstr "Eindpunt"
+
+#: datafirefly-server-side.php:1221
+msgid "Client + full funnel"
+msgstr "Client + volledige funnel"
+
+#: datafirefly-server-side.php:1223
+msgid "Gate on marketing consent"
+msgstr "Koppelen aan marketingtoestemming"
+
+#: datafirefly-server-side.php:1227
+msgid "Save"
+msgstr "Opslaan"
+
+#: datafirefly-server-side.php:1245
+msgid "Browser tags"
+msgstr "Browser-tags"
+
+#: datafirefly-server-side.php:1253
+msgid "not configured on your DataFirefly account"
+msgstr "niet geconfigureerd in uw DataFirefly-account"
+
+#: datafirefly-server-side.php:1257
+msgid "Uncheck a platform you do not use: its code is not sent to the browser at all, and its third-party script and cookies never load. Server-side delivery is managed in your DataFirefly client space and is not affected."
+msgstr "Schakel een platform uit dat u niet gebruikt: de code ervan wordt dan helemaal niet naar de browser gestuurd en het script van de derde partij en de cookies worden nooit geladen. De levering vanaf de server wordt beheerd in uw DataFirefly-klantomgeving en blijft ongewijzigd."
+
+#: datafirefly-server-side.php:1259
+msgid "Lead and engagement events"
+msgstr "Lead- en betrokkenheidsgebeurtenissen"
+
+#: datafirefly-server-side.php:1261
+#: datafirefly-server-side.php:1278
+#: datafirefly-server-side.php:1304
+msgid "Enabled"
+msgstr "Ingeschakeld"
+
+#: datafirefly-server-side.php:1262
+msgid "Detects clicks on email and phone links, booking links (Calendly...), social shares, free-trial links, newsletter sign-ups, job applications and tagged donate / store-locator buttons. Useful for content and service sites. A shop that does not need them can switch them off: the script is then not loaded. Lead forms, registration and the purchase funnel are not affected."
+msgstr "Herkent klikken op e-mail- en telefoonlinks, boekingslinks (Calendly…), social shares, links naar gratis proefversies, aanmeldingen voor de nieuwsbrief, sollicitaties en getagde donatie- of winkelzoekerknoppen. Nuttig voor content- en dienstensites. Een winkel die ze niet nodig heeft, kan ze uitschakelen: het script wordt dan niet geladen. Leadformulieren, registratie en de aankoopfunnel worden niet beïnvloed."
+
+#: datafirefly-server-side.php:1275
+msgid "Carry the ad click ID across pages"
+msgstr "Het advertentieklik-ID over pagina's meenemen"
+
+#: datafirefly-server-side.php:1279
+msgid "A Google click ID only exists in the URL of the landing page. Without this, a shopper who arrives from an ad, browses, then accepts the banner has already lost it, and the sale can never be attributed. This carries it on your own internal links, in the URL only: nothing is written to the device, and it is never passed to another site. The cookie itself still waits for consent."
+msgstr "Een Google-klik-ID bestaat alleen in de URL van de landingspagina. Zonder deze optie heeft een koper die via een advertentie binnenkomt, rondkijkt en dan de banner accepteert, het al kwijt, en kan de verkoop nooit worden toegewezen. De optie neemt het mee op uw interne links, alleen in de URL: er wordt niets op het apparaat opgeslagen en het wordt nooit aan een andere site doorgegeven. De cookie zelf wacht nog steeds op toestemming."
+
+#: datafirefly-server-side.php:1281
+msgid "Hold events until consent (minutes)"
+msgstr "Gebeurtenissen vasthouden tot toestemming (minuten)"
+
+#: datafirefly-server-side.php:1284
+msgid "A shopper who has not yet answered the banner is not a shopper who refused. With a value above zero, their events wait IN THEIR OWN BROWSER for that many minutes: nothing reaches your shop or DataFirefly. If they accept, the events are sent. If they refuse, or the delay passes, they are discarded. An explicit refusal is never held, whatever the value. Zero disables it, and zero is the default: this is a compliance decision, not a technical setting. Ask your data protection officer."
+msgstr "Een koper die nog niet op de banner heeft gereageerd, is geen koper die heeft geweigerd. Bij een waarde boven nul wachten zijn gebeurtenissen dat aantal minuten IN ZIJN EIGEN BROWSER: er bereikt niets uw winkel of DataFirefly. Als hij accepteert, worden de gebeurtenissen verzonden. Als hij weigert, of de termijn verstrijkt, worden ze verwijderd. Een uitdrukkelijke weigering wordt nooit vastgehouden, welke waarde ook. Nul schakelt de functie uit, en nul is de standaard: dit is een compliancebeslissing, geen technische instelling. Vraag het aan uw functionaris voor gegevensbescherming."
+
+#: datafirefly-server-side.php:1286
+msgid "Google consent mode"
+msgstr "Google-toestemmingsmodus"
+
+#: datafirefly-server-side.php:1289
+msgid "Basic (nothing loads before consent)"
+msgstr "Basis (er wordt niets geladen vóór toestemming)"
+
+#: datafirefly-server-side.php:1290
+msgid "Advanced (Google tags load cookieless before consent)"
+msgstr "Geavanceerd (Google-tags laden vóór toestemming zonder cookies)"
+
+#: datafirefly-server-side.php:1292
+msgid "Basic is the default: no tag of any kind loads until the visitor accepts. Advanced loads the Google tags (GA4, Google Ads) as soon as the page opens, with consent denied: until the visitor accepts, they send cookieless pings (time, browser, referring page, consent state; the IP address is truncated) that Google uses to model the conversions and visits it cannot see. Meta, TikTok and every other platform still wait for consent. This is a compliance decision, not a technical setting: ask your data protection officer."
+msgstr "Basis is de standaard: geen enkele tag wordt geladen voordat de bezoeker heeft geaccepteerd. Geavanceerd laadt de Google-tags (GA4, Google Ads) zodra de pagina opent, met geweigerde toestemming: totdat de bezoeker accepteert, sturen ze cookieloze pings (tijd, browser, verwijzende pagina, toestemmingsstatus; het IP-adres wordt ingekort) die Google gebruikt om de conversies en bezoeken te modelleren die het niet ziet. Meta, TikTok en alle andere platforms wachten nog steeds op toestemming. Dit is een compliancebeslissing, geen technische instelling: vraag het aan uw functionaris voor gegevensbescherming."
+
+#: datafirefly-server-side.php:1294
+msgid "Where consent is denied by default"
+msgstr "Waar toestemming standaard wordt geweigerd"
+
+#: datafirefly-server-side.php:1297
+msgid "Everywhere"
+msgstr "Overal"
+
+#: datafirefly-server-side.php:1298
+msgid "EEA, United Kingdom and Switzerland only"
+msgstr "Alleen EER, Verenigd Koninkrijk en Zwitserland"
+
+#: datafirefly-server-side.php:1300
+msgid "Advanced mode only. With the second choice, visitors outside these countries are treated as consenting by the Google tags until they answer. Applies only when your consent tool does not already send Google its own default: if it does (Cookiebot, Complianz, DataFirefly Cookie Consent...), its default wins and this setting has no effect."
+msgstr "Alleen in de geavanceerde modus. Bij de tweede keuze worden bezoekers buiten deze landen door de Google-tags als toestemmend behandeld totdat ze antwoorden. Geldt alleen wanneer uw toestemmingstool Google niet al zijn eigen standaard stuurt: als dat wel zo is (Cookiebot, Complianz, DataFirefly Cookie Consent…), heeft de standaard daarvan voorrang en heeft deze instelling geen effect."
+
+#: datafirefly-server-side.php:1302
+msgid "Hide the ad click ID while ads consent is denied"
+msgstr "Het advertentieklik-ID verbergen zolang de advertentietoestemming is geweigerd"
+
+#: datafirefly-server-side.php:1305
+msgid "Advanced mode only. Removes the Google click ID from the cookieless pings until the visitor accepts advertising. The most privacy-protective choice; Google says it can reduce modelling accuracy."
+msgstr "Alleen in de geavanceerde modus. Verwijdert het Google-klik-ID uit de cookieloze pings totdat de bezoeker advertenties accepteert. De privacyvriendelijkste keuze; volgens Google kan dit de nauwkeurigheid van de modellering verminderen."
+
+#: datafirefly-server-side.php:1330
+msgid "Not connected"
+msgstr "Niet verbonden"
+
+#. translators: %d: number of events delivered in the last 24 hours.
+#: datafirefly-server-side.php:1335
+#, php-format
+msgid "Delivered in last 24h: %d"
+msgstr "Afgeleverd in de afgelopen 24 uur: %d"
+
+#. translators: %d: number of events currently queued for retry.
+#: datafirefly-server-side.php:1340
+#, php-format
+msgid "Queued for retry: %d"
+msgstr "In wachtrij voor nieuwe poging: %d"
+
+#: datafirefly-server-side.php:1347
+msgid "Time"
+msgstr "Tijd"
+
+#: datafirefly-server-side.php:1348
+msgid "Event"
+msgstr "Gebeurtenis"
+
+#: datafirefly-server-side.php:1349
+msgid "Source"
+msgstr "Bron"
+
+#: datafirefly-server-side.php:1350
+msgid "Status"
+msgstr "Status"
+
+#: datafirefly-server-side.php:1351
+msgid "Detail"
+msgstr "Detail"
+
+#: datafirefly-server-side.php:1358
+msgid "Updates automatically every 30 seconds. The client side fires the browser pixel; the server side is the ad-blocker-proof delivery, and both share one event id for deduplication."
+msgstr "Wordt elke 30 seconden automatisch bijgewerkt. De clientzijde activeert de browserpixel; de serverzijde zorgt voor de adblockerbestendige levering, en beide delen één gebeurtenis-ID voor ontdubbeling."
+
+#: datafirefly-server-side.php:1384
+msgid "No events yet."
+msgstr "Nog geen gebeurtenissen."
+
+#: datafirefly-server-side.php:1388
+msgid "Delivered"
+msgstr "Afgeleverd"
+
+#: datafirefly-server-side.php:1389
+msgid "Queued (retry)"
+msgstr "In wachtrij (nieuwe poging)"
+
+#: datafirefly-server-side.php:1390
+msgid "Retrying"
+msgstr "Opnieuw proberen"
+
+#: datafirefly-server-side.php:1391
+msgid "Rejected"
+msgstr "Geweigerd"
+
+#: datafirefly-server-side.php:1392
+msgid "Gave up"
+msgstr "Opgegeven"
+
+#. translators: %d: number of delivery attempts for this event.
+#: datafirefly-server-side.php:1411
+#, php-format
+msgid "%d attempts"
+msgstr "%d pogingen"
+
+#: datafirefly-server-side.php:1417
+msgid "client beacon"
+msgstr "client-beacon"
+
+#: datafirefly-server-side.php:1417
+msgid "server"
+msgstr "server"
+
+#: includes/class-dfss-legacy.php:103
+msgid "An older copy of DataFirefly Server-Side (folder \"datafirefly-serverside\") is still installed. It has been deactivated and this version has taken over with the same settings. You can delete the older copy from the Plugins screen: your settings are kept."
+msgstr "Er is nog een oudere kopie van DataFirefly Server-Side geïnstalleerd (map \"datafirefly-serverside\"). Deze is gedeactiveerd en deze versie heeft het overgenomen met dezelfde instellingen. U kunt de oudere kopie verwijderen via het pluginscherm: uw instellingen blijven behouden."

@@ -11,6 +11,7 @@
  * License:           GPLv2 or later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       datafirefly-server-side
+ * Domain Path:       /languages
  */
 
 if (!defined('ABSPATH')) {
@@ -63,6 +64,10 @@ class DFSS_Plugin
 
     public function __construct()
     {
+        // The bundled translations (languages/): French, German, Spanish, Italian, Dutch, Polish,
+        // Portuguese and Czech. Loaded on init so the user's own locale applies in the admin.
+        add_action('init', array($this, 'load_textdomain'));
+
         // ---- admin ---------------------------------------------------------
         add_action('admin_menu', array($this, 'admin_menu'));
         add_action('admin_init', array($this, 'maybe_save'));
@@ -101,6 +106,28 @@ class DFSS_Plugin
         add_action(DFSS_Truth::CRON_HOOK, array($this, 'run_truth'));
         // Self-heal a lost schedule from admin and cron requests only, never on storefront pages.
         add_action('init', array($this, 'ensure_cron_on_cron'));
+    }
+
+    /**
+     * Load the bundled translation for the current locale (the user's own in the admin). An exact match
+     * first (fr_FR), else a shipped locale of the same language (fr_CA falls back on fr_FR).
+     */
+    public function load_textdomain()
+    {
+        $locale = determine_locale();
+        $dir = plugin_dir_path(__FILE__) . 'languages/';
+        $file = $dir . 'datafirefly-server-side-' . $locale . '.mo';
+        if (!is_readable($file)) {
+            $file = '';
+            $lang = strtok($locale, '_');
+            foreach ((array) glob($dir . 'datafirefly-server-side-' . $lang . '_*.mo') as $candidate) {
+                $file = $candidate;
+                break;
+            }
+        }
+        if ($file !== '') {
+            load_textdomain('datafirefly-server-side', $file, $locale);
+        }
     }
 
     public function ensure_cron_on_cron()
