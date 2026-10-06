@@ -1110,7 +1110,11 @@
 			if (owned) {
 				w.gtag('consent', 'default', defaultsCommand(env.consent));
 			}
-			w.gtag('set', 'ads_data_redaction', !(env.consent && env.consent.adsDataRedaction === false));
+			// Only when WE own the defaults: a consent tool that already set them drives Google's consent
+			// state (redaction included), and overriding its choice from here would fight it.
+			if (owned) {
+				w.gtag('set', 'ads_data_redaction', !(env.consent && env.consent.adsDataRedaction === false));
+			}
 			try { env.injectGa4(); } catch (e) {}
 			try { env.injectGoogleAds(); } catch (e) {}
 			if (owned) {
@@ -1130,13 +1134,29 @@
 			return owned;
 		}
 
+		/**
+		 * True when the page is being SHOWN AGAIN (reload, back/forward) rather than reached. Used for the
+		 * browser GA4 purchase: a reloaded confirmation page must not count the order a second time. No
+		 * storage is written for it: the navigation type is the browser's own, and a marker kept on the
+		 * device for a visitor who refused marketing would be a worse trade than the rare duplicate it
+		 * could still miss (the same page opened in a new tab).
+		 */
+		function isRepeatView(w) {
+			try {
+				var nav = w.performance && w.performance.getEntriesByType && w.performance.getEntriesByType('navigation')[0];
+				return !!(nav && (nav.type === 'reload' || nav.type === 'back_forward'));
+			} catch (e) {
+				return false;
+			}
+		}
+
 		function fire(env, name, eventId, data, verdict) {
 			var sent = [];
 			var w = env.win;
 			var ga4Id = env.pub && env.pub.ga4 && env.pub.ga4.measurementId;
 			var ga4Name = env.ga4Map && env.ga4Map[name];
 			var toGa4 = !!(ga4Id && ga4Name && typeof w.gtag === 'function');
-			if (name === 'purchase' && !ga4FromBrowserForPurchase(verdict)) {
+			if (name === 'purchase' && (!ga4FromBrowserForPurchase(verdict) || isRepeatView(w))) {
 				toGa4 = false;
 			}
 			// A visitor who has already accepted is measured by the server, as in
