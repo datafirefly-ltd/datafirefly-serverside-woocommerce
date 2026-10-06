@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.28.0
+Stable tag: 2.29.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,15 @@ The core tracker is about 10 KB compressed, loaded deferred in the footer. Each 
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.29.0 =
+* New: the settings screen and its messages are translated into French, German, Spanish, Italian, Dutch, Polish, Portuguese and Czech. The language follows the WordPress user's locale; any other language stays in English.
+* Fix: Google Consent Mode advanced no longer counts an order a second time in GA4 when the confirmation page is reloaded or revisited with the back button.
+* Fix: the consent verdict handed to the confirmation page now asks whether consent is required first, as the server does. An old refused order on a shop that has since switched consent gating off could reach GA4 twice.
+* Fix: Consent Mode advanced leaves ads_data_redaction to the consent tool when that tool already set Google's defaults.
+* Fix: the browser_sent list read from the page accepts strings only; a forged payload no longer raises a PHP warning.
+* Improved: the cookieless GA4 pings of Consent Mode advanced now carry search_term, item_list_id, item_list_name and the items of the event.
+* Code: the shared consent and design blocks are now in English. The reason the tracker leaves some events out of the server beacon (quota and cost) is documented in the code.
 
 = 2.28.0 =
 * New: Google Ads and OpenAI (ChatGPT Ads) browser tags can now be switched off, like Meta, GA4 and TikTok.
@@ -155,6 +164,9 @@ Yes. When "Require consent" is on (default), no tag is injected and no event is 
 * Server-side purchase event delivery.
 
 == Upgrade Notice ==
+
+= 2.29.0 =
+Translations added and a few consent fixes. No setting changes.
 
 = 2.28.0 =
 Every browser tag stays enabled on upgrade: nothing changes until you untick one.
