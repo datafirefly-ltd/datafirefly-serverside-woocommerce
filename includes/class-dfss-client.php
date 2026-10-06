@@ -1,16 +1,6 @@
 <?php
 /**
- * DataFirefly Server-Side (WooCommerce) — signing HTTP client.
- *
- * Signs an event payload with the tenant's HMAC secret and POSTs it to the
- * dispatcher, exactly per the dispatcher contract:
- *   X-Dfss-Tenant            : tenant id
- *   X-Dfss-Timestamp         : unix seconds (server checks a +/-300s window)
- *   X-Dfss-Signature-Version : 2
- *   X-Dfss-Signature         : hex HMAC-SHA256(timestamp + "\n" + rawBody, secret)
- *
- * Fail-safe: every error is captured and returned, never thrown, so a tracking
- * hiccup can never break the shop's checkout.
+ * Signing HTTP client for the dispatcher. Never throws: a tracking error must not break checkout.
  */
 if (!defined('ABSPATH')) {
     exit;
@@ -18,11 +8,17 @@ if (!defined('ABSPATH')) {
 
 class DFSS_Client
 {
-    /** @var string */
+    /**
+     * @var string
+     */
     private $tenant_id;
-    /** @var string */
+    /**
+     * @var string
+     */
     private $secret;
-    /** @var string */
+    /**
+     * @var string
+     */
     private $endpoint;
 
     public function __construct($tenant_id, $secret, $endpoint)
@@ -45,11 +41,8 @@ class DFSS_Client
             return array('ok' => false, 'code' => 0, 'message' => 'not_configured');
         }
 
-        // An empty userData is a legitimate event since 2.22.0 (a purchase or a
-        // login without consent carries none). PHP encodes an empty array as
-        // `[]`, which the dispatcher's z.object() rejects, event and all; and
-        // the retry queue hands the payload back as an array whatever it was
-        // when first sent. So the fix lives here, on the only path out.
+        // An empty userData is a legitimate event since 2.22.0 (a purchase or a login without consent
+        // carries none).
         if (isset($payload['userData']) && $payload['userData'] === array()) {
             $payload['userData'] = new stdClass();
         }
@@ -66,16 +59,6 @@ class DFSS_Client
     /**
      * Fetch the tenant's PUBLIC destination ids from the dispatcher.
      *
-     * Mirrors the dispatcher contract for POST /v1/tenant/public-config: the
-     * body carries no data, so we sign an empty `{}` JSON object (kept as POST
-     * because a raw body must always exist for the HMAC signature). The
-     * response is `{ tenantId, public: { meta?, ga4?, tiktok?, pinterest? } }`
-     * — PUBLIC ids only, never an accessToken or apiSecret.
-     *
-     * The public-config URL is derived from the events endpoint by swapping the
-     * trailing `/v1/events` for `/v1/tenant/public-config`, so a single key keeps
-     * configuring everything.
-     *
      * @return array{ok:bool,code:int,public:array,message:string}
      */
     public function get_public_config()
@@ -85,8 +68,8 @@ class DFSS_Client
         }
 
         $url = $this->public_config_url();
-        // Empty object — the dispatcher signs/validates the raw body, which must
-        // be exactly the two bytes "{}" on both sides.
+        // Empty object, the dispatcher signs/validates the raw body, which must be exactly the two
+        // bytes "{}" on both sides.
         $body = '{}';
 
         $result = $this->request($url, $body);
@@ -108,14 +91,8 @@ class DFSS_Client
     }
 
     /**
-     * Derive the public-config URL from the events endpoint.
-     *
-     * @return string
-     */
-    /**
-     * Send the shop's daily totals to POST /v1/truth, sibling of the events
-     * endpoint and signed the same way. Allowed to fail: nothing is lost, the
-     * next daily run sends the day again.
+     * Send the shop's daily totals to POST /v1/truth, sibling of the events endpoint and signed the
+     * same way.
      *
      * @param array $payload {date, orders, revenue, currency, refunds?, refundAmount?, timezone?}
      *
@@ -152,6 +129,11 @@ class DFSS_Client
         return $parts['scheme'] . '://' . $parts['host'] . $port . $path;
     }
 
+    /**
+     * Derive the public-config URL from the events endpoint.
+     *
+     * @return string
+     */
     private function public_config_url()
     {
         $endpoint = $this->endpoint;
@@ -174,23 +156,12 @@ class DFSS_Client
     }
 
     /**
-     * Sign a raw body and POST it to a dispatcher URL.
-     *
-     * Shared by send(), send_truth() and get_public_config() so the HMAC scheme
-     * lives in exactly one place and no signed call can be left behind on the
-     * old scheme: headers X-Dfss-Tenant, X-Dfss-Timestamp (unix seconds, the
-     * server allows a +/-300s window), X-Dfss-Signature-Version: 2, and
-     * X-Dfss-Signature = lowercase hex HMAC-SHA256(timestamp + LF + rawBody).
-     *
-     * The timestamp is inside the signed string since 2.23.0. Signing the body
-     * alone left the timestamp unauthenticated, so the dispatcher's +/-300s
-     * window protected nothing: a captured (body, signature) pair replayed with
-     * a fresh timestamp was accepted forever.
-     *
-     * Fail-safe: every error is captured and returned, never thrown.
+     * Sign a raw body and POST it. The only signed path out: send(), send_truth() and
+     * get_public_config() all use it. Signature v2 covers the timestamp too, so a captured request
+     * cannot be replayed with a fresh one (the dispatcher allows +/-300 s).
      *
      * @param string $url
-     * @param string $body Raw bytes — these exact bytes are both signed and sent.
+     * @param string $body Raw bytes: exactly what is signed and sent.
      * @param int    $timeout
      *
      * @return array{ok:bool,code:int,message:string}
@@ -198,17 +169,10 @@ class DFSS_Client
     private function request($url, $body, $timeout = 4)
     {
         $timestamp = (string) time();
-        // The signed string is the timestamp, one LF, then the exact bytes we
-        // POST. hash_hmac() returns lowercase hex by default, and the
-        // dispatcher rejects anything that is not exactly 64 lowercase hex
-        // chars.
+        // Signed string: timestamp, LF, then the exact bytes we POST (lowercase hex HMAC-SHA256).
         $signature = hash_hmac('sha256', $timestamp . "\n" . $body, $this->secret);
 
-        // The safe variant: the URL is operator-supplied (Advanced form), and
-        // wp_safe_remote_post() refuses loopback, private ranges and odd
-        // ports, so a mistyped or hostile endpoint cannot turn the shop into
-        // an SSRF relay signing requests at its own network (audit
-        // 2026-09-04, F2).
+        // The safe variant refuses loopback and private ranges: the URL can be operator-supplied.
         $response = wp_safe_remote_post(
             $url,
             array(

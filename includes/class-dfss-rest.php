@@ -1,28 +1,6 @@
 <?php
 /**
- * DataFirefly Server-Side (WooCommerce) — public beacon endpoint.
- *
- * Registers POST /wp-json/dfss/v1/collect. The browser tracker
- * (assets/dfss-tracker.js) fires a client pixel event AND beacons the same
- * event (with the same event_id) here; this endpoint signs it with the tenant
- * HMAC secret and forwards it to the dispatcher's CAPI. Meta/GA/TikTok then
- * deduplicate on (event_name, event_id), so the conversion is counted once even
- * when an ad-blocker kills the client pixel.
- *
- * This endpoint is PUBLIC — any anonymous visitor hits it — so it is built to
- * be safe against hostile input:
- *   - per-IP rolling-window rate limit backed by a transient;
- *   - request body size cap;
- *   - strict per-field sanitization before anything is forwarded;
- *   - the HMAC secret NEVER leaves the server (it stays in get_option);
- *   - identity (email/externalId) is taken from the logged-in WP/Woo session
- *     and ONLY on a verified wp_rest nonce — the browser cannot impersonate a
- *     customer, and a stale nonce on a cached page degrades to an anonymous (but
- *     still recorded) conversion rather than a dropped one (see permission_check);
- *   - no raw PII is ever logged.
- *
- * On a retryable forward failure the event is enqueued (DFSS_Queue) so a brief
- * outage never loses a conversion.
+ * Public beacon endpoint (POST /wp-json/dfss/v1/collect): sanitizes, signs and forwards browser events.
  */
 if (!defined('ABSPATH')) {
     exit;
@@ -34,34 +12,29 @@ class DFSS_REST
     const ROUTE = '/collect';
 
     // Hard caps to keep hostile payloads cheap to reject.
-    const MAX_BODY_BYTES = 16384;     // 16 KB is ample for a single event
+    const MAX_BODY_BYTES = 16384;     // one event
+    const MAX_BATCH = 10;             // events per batched request
+    const MAX_BATCH_BYTES = 65536;    // whole batched request
     const MAX_PRODUCTS = 50;
-    // Beacons are nonce-gated and tiny; a single real shopper legitimately fires
-    // several per minute (page_view + view_item + add_to_cart...), and behind a
-    // NAT/CDN many shoppers can share one egress IP. Keep the cap generous so we
-    // never drop real conversions; the nonce + size cap + sanitization are the
-    // real abuse guards. Operators can refine the source IP via `dfss_client_ip`.
-    const RATE_LIMIT_MAX = 120;       // requests...
-    const RATE_LIMIT_WINDOW = 60;     // ...per this many seconds, per IP (rolling bucket)
-    // Upper bounds on the numbers a beacon may carry. A single 1e300 value
-    // would not crash anything, but it would sit in a merchant's revenue
-    // report as a fact (audit 2026-09-04, M5). Above the bound the field is
-    // dropped, never clamped: a clamped figure is still a fabricated one.
+    // Generous on purpose: one shopper fires several events a minute, and a NAT or CDN egress IP
+    // is shared by many. The nonce, size caps and sanitization are the real abuse guards.
+    const RATE_LIMIT_MAX = 120;       // events...
+    const RATE_LIMIT_WINDOW = 60;     // ...per this many seconds, per IP
+    // Above these bounds a field is dropped, never clamped: a clamped figure is still fabricated.
     const MAX_VALUE = 10000000;       // 1e7, in the shop currency
     const MAX_ITEMS = 10000;
 
     /**
-     * Events the beacon only accepts on a VALID wp_rest nonce. They are the
-     * ones with no page context of their own to check against, so a forged
-     * beacon costs nothing and reads as a real lead, a real registration or
-     * a real payment step in the merchant's reports (audit 2026-09-04, M5).
-     * The rest of the funnel keeps the soft policy of permission_check().
+     * Events accepted only with a valid wp_rest nonce: they have no page context to check against,
+     * so a forged beacon would cost nothing.
      *
      * @var string[]
      */
     const NONCE_REQUIRED_EVENTS = array('lead', 'complete_registration', 'add_payment_info');
 
-    /** @var callable():array A provider returning the current plugin options. */
+    /**
+     * @var callable():array A provider returning the current plugin options.
+     */
     private $opts_provider;
 
     /**
@@ -74,16 +47,8 @@ class DFSS_REST
 
     public function register_routes()
     {
-        // A fresh wp_rest nonce for the page's session. Full-page caches
-        // (LiteSpeed, WP Rocket, Cloudflare APO) serve HTML whose baked-in
-        // nonce rotates and goes stale, and since 2.22.0 lead /
-        // complete_registration / add_payment_info are refused without a valid
-        // one: on a cached site every form lead would be lost. The tracker asks
-        // here once, on the visitor's first interaction, and never on a cached
-        // response (no-store). For an anonymous visitor this is the same nonce
-        // WordPress would bake into an uncached page: it proves the request was
-        // made by a page of this site, not by a blind cross-site post. Core's
-        // admin-ajax `rest-nonce` answers 0 to anonymous visitors, hence this.
+        // Fresh nonce for pages served from a full-page cache, whose baked-in nonce goes stale.
+        // Never cached; asked once, on the visitor's first interaction.
         register_rest_route(
             self::REST_NAMESPACE,
             '/nonce',
@@ -101,26 +66,16 @@ class DFSS_REST
                 'methods' => 'POST',
                 'callback' => array($this, 'handle_collect'),
                 'permission_callback' => array($this, 'permission_check'),
-                // We read the body ourselves (JSON), so no args schema here; we
-                // sanitize every field explicitly in the handler.
+                // No args schema: the JSON body is sanitized field by field in the handler.
             )
         );
     }
 
     /**
-     * Permission gate. The endpoint is public (anonymous visitors), so the
-     * "permission" is: the plugin connected with complete tracking on, and the
-     * per-IP rate limit.
+     * Permission gate: connected, complete tracking on, within the per-IP rate limit.
      *
-     * NONCE / CACHE POLICY (the "soft policy" for full-page-cached stores): we do
-     * NOT hard-reject on a missing/stale nonce. On Litespeed/WP Rocket/Cloudflare
-     * APO the nonce baked into cached HTML rotates and goes stale, which would
-     * silently drop top-of-funnel (and even purchase) beacons — the exact thing
-     * this version exists to capture. Instead, a valid nonce only UPGRADES the
-     * request to "trusted same-origin": the handler attaches server-side identity
-     * (logged-in customer email/id) only then. A stale/absent nonce still records
-     * an anonymous conversion. This is safe because the endpoint never trusts the
-     * body for identity and is rate-limited, size-capped and strictly sanitized.
+     * A missing or stale nonce is not rejected here (full-page caches would lose the funnel): it only
+     * withholds identity, and NONCE_REQUIRED_EVENTS are refused in the handler.
      *
      * @param WP_REST_Request $request
      *
@@ -144,12 +99,7 @@ class DFSS_REST
     }
 
     /**
-     * Whether the request carries a valid wp_rest nonce. Used to decide if we may
-     * attach server-trusted identity (see the cache policy note above).
-     *
-     * WP REST passes the nonce as the X-WP-Nonce header or _wpnonce param
-     * (sendBeacon can't set headers, so the tracker puts it in the URL).
-     * wp_verify_nonce returns 1 (this session) or 2 (older but still valid).
+     * Whether the request carries a valid wp_rest nonce.
      *
      * @param WP_REST_Request $request
      *
@@ -166,16 +116,7 @@ class DFSS_REST
     }
 
     /**
-     * Handle one beacon: sanitize -> consent gate -> sign+forward -> enqueue on
-     * retryable failure. Always returns 2xx to the browser (a tracking error
-     * must never surface to the visitor); the real status lives in the queue.
-     *
-     * @param WP_REST_Request $request
-     *
-     * @return WP_REST_Response
-     */
-    /**
-     * GET /nonce: see register_rest(). Never cacheable.
+     * GET /nonce: a fresh wp_rest nonce, never cacheable.
      *
      * @param WP_REST_Request $request
      *
@@ -190,19 +131,42 @@ class DFSS_REST
         return $response;
     }
 
+    /**
+     * POST /collect: one event, or a batch {"events": [...]} sent by the tracker for page-load
+     * events, so a page costs one WordPress boot instead of one per event.
+     *
+     * Always answers 200: a tracking error must never surface to the visitor. Each event is sent
+     * and recorded on its own, retryable failures go to the queue.
+     *
+     * @param WP_REST_Request $request
+     *
+     * @return WP_REST_Response
+     */
     public function handle_collect($request)
     {
         $opts = $this->opts();
 
-        // Size cap: reject oversized bodies outright.
-        $raw = $request->get_body();
-        if (strlen((string) $raw) > self::MAX_BODY_BYTES) {
+        $raw = (string) $request->get_body();
+        if (strlen($raw) > self::MAX_BATCH_BYTES) {
             return new WP_REST_Response(array('ok' => false, 'reason' => 'too_large'), 200);
         }
 
-        $body = json_decode((string) $raw, true);
+        $body = json_decode($raw, true);
         if (!is_array($body)) {
             return new WP_REST_Response(array('ok' => false, 'reason' => 'bad_json'), 200);
+        }
+
+        if (isset($body['events']) && is_array($body['events'])) {
+            $events = array_slice(array_values($body['events']), 0, self::MAX_BATCH);
+            // permission_check() counted one request: count the rest of the batch too.
+            if (count($events) > 1 && !$this->rate_limit_ok(count($events) - 1)) {
+                return new WP_REST_Response(array('ok' => false, 'reason' => 'rate_limited'), 200);
+            }
+        } else {
+            if (strlen($raw) > self::MAX_BODY_BYTES) {
+                return new WP_REST_Response(array('ok' => false, 'reason' => 'too_large'), 200);
+            }
+            $events = array($body);
         }
 
         // Server-side consent gate (defense in depth; the client already gated).
@@ -210,60 +174,67 @@ class DFSS_REST
             return new WP_REST_Response(array('ok' => false, 'reason' => 'no_consent'), 200);
         }
 
-        $beacon = $this->sanitize_beacon($body);
-        if ($beacon === null) {
-            return new WP_REST_Response(array('ok' => false, 'reason' => 'invalid'), 200);
+        $context = array(
+            'nonce_ok' => $this->nonce_is_valid($request),
+            'ip' => $this->client_ip(),
+            'ua' => $this->client_ua($request),
+            'client' => new DFSS_Client($opts['tenant_id'], $opts['hmac_secret'], $opts['endpoint']),
+        );
+
+        $ok = false;
+        $reason = '';
+        foreach ($events as $event) {
+            $result = is_array($event) ? $this->collect_one($event, $context) : 'invalid';
+            if ($result === true) {
+                $ok = true;
+            } elseif ($reason === '' && is_string($result)) {
+                $reason = $result;
+            }
         }
 
-        $nonce_ok = $this->nonce_is_valid($request);
-
-        // The events anyone could fabricate for free are not recorded without
-        // proof the beacon came from a page we served (see NONCE_REQUIRED_EVENTS).
-        if (!$nonce_ok && in_array($beacon['event_name'], self::NONCE_REQUIRED_EVENTS, true)) {
-            return new WP_REST_Response(array('ok' => false, 'reason' => 'nonce'), 200);
-        }
-
-        // Identity is server-trusted only, AND only on a verified same-origin
-        // request (valid wp_rest nonce). For a logged-in customer we attach their
-        // email/id ourselves. The browser body is NEVER trusted for identity
-        // (prevents a hostile beacon claiming someone's id). On a stale-nonce
-        // cached page we still record the conversion, just without identity.
-        if ($nonce_ok) {
-            $beacon['user_data'] = array_merge(
-                $beacon['user_data'],
-                $this->server_identity()
-            );
-        }
-
-        // Server-resolved IP + UA (authoritative, not from the body).
-        $client_ip = $this->client_ip();
-        $client_ua = $this->client_ua($request);
-
-        $payload = DFSS_Event_Builder::build_from_beacon($beacon, $client_ip, $client_ua);
-        if (null === $payload) {
-            return new WP_REST_Response(array('ok' => false, 'reason' => 'unmappable'), 200);
-        }
-
-        $client = new DFSS_Client($opts['tenant_id'], $opts['hmac_secret'], $opts['endpoint']);
-        $result = $client->send($payload);
-
-        // Observability + reliability: every attempt is recorded; retryable
-        // failures get queued for the cron to replay.
-        DFSS_Queue::record_attempt($payload, $result, 'beacon');
-
-        // Never leak the dispatcher message (could echo back input); just a flag.
-        return new WP_REST_Response(array('ok' => !empty($result['ok'])), 200);
+        // Never leak the dispatcher message (could echo back input); a flag and a reason key only.
+        return new WP_REST_Response($ok || $reason === '' ? array('ok' => $ok) : array('ok' => false, 'reason' => $reason), 200);
     }
 
-    // --- sanitization --------------------------------------------------------
+    /**
+     * Sanitize, check, build, send and record one event.
+     *
+     * @param array $body    Raw event from the request body.
+     * @param array $context {nonce_ok, ip, ua, client}.
+     *
+     * @return true|string|false True when delivered, a reason key when refused, false when the
+     *                           dispatcher did not accept it (queued if retryable).
+     */
+    private function collect_one(array $body, array $context)
+    {
+        $beacon = $this->sanitize_beacon($body);
+        if ($beacon === null) {
+            return 'invalid';
+        }
+        if (!$context['nonce_ok'] && in_array($beacon['event_name'], self::NONCE_REQUIRED_EVENTS, true)) {
+            return 'nonce';
+        }
+
+        // Identity comes from the server session only, and only on a verified same-origin request.
+        if ($context['nonce_ok']) {
+            $beacon['user_data'] = array_merge($beacon['user_data'], $this->server_identity());
+        }
+
+        $payload = DFSS_Event_Builder::build_from_beacon($beacon, $context['ip'], $context['ua']);
+        if (null === $payload) {
+            return 'unmappable';
+        }
+
+        $result = $context['client']->send($payload);
+        DFSS_Queue::record_attempt($payload, $result, 'beacon');
+
+        return !empty($result['ok']) ? true : false;
+    }
+
+    // ---- sanitization ------------------------------------------------------
 
     /**
-     * Strictly sanitize the raw beacon body into the shape build_from_beacon()
-     * expects. Returns null if the essentials (event name + id) are missing.
-     *
-     * Every string goes through sanitize_text_field(wp_unslash()); URLs through
-     * esc_url_raw; numbers are cast. Unknown keys are dropped (we only read the
-     * fields we know). This is the trust boundary for hostile input.
+     * Strictly sanitize the raw beacon body into the shape build_from_beacon() expects.
      *
      * @param array $body
      *
@@ -289,11 +260,7 @@ class DFSS_REST
         $source_url = isset($body['source_url'])
             ? esc_url_raw(wp_unslash((string) $body['source_url']))
             : '';
-        // A page of THIS site, or the home page. The value is forwarded as the
-        // event's page_location and shows up in GA4 as if the visit happened
-        // there; a beacon naming another host would plant a foreign URL in the
-        // merchant's reports (audit 2026-09-04, M5). Referrers are legitimately
-        // external and stay untouched.
+        // A page of THIS site, or the home page.
         if ($source_url !== '' && !$this->is_own_host($source_url)) {
             $source_url = home_url('/');
         }
@@ -322,7 +289,6 @@ class DFSS_REST
 
     /**
      * Destinations the storefront tag already served (Consent Mode advanced).
-     * Closed list: anything else is dropped, never forwarded.
      *
      * @param array $body
      *
@@ -336,8 +302,8 @@ class DFSS_REST
     }
 
     /**
-     * event_id is our own UUID v4 or "order_<id>" — restrict to a safe charset
-     * and the schema's 1..128 length so nothing weird reaches the dispatcher.
+     * event_id is our own UUID v4 or "order_<id>", restrict to a safe charset and the schema's 1..128
+     * length so nothing weird reaches the dispatcher.
      *
      * @param mixed $value
      *
@@ -358,9 +324,7 @@ class DFSS_REST
     }
 
     /**
-     * Sanitize the browser identifiers we accept from the body. We deliberately
-     * do NOT accept email/externalId from the body — identity is server-trusted
-     * (see server_identity()). Each value is a short opaque token.
+     * Sanitize the browser identifiers we accept from the body.
      *
      * @param array $in
      *
@@ -369,8 +333,8 @@ class DFSS_REST
     private function sanitize_user_data(array $in)
     {
         $out = array();
-        // Cookie/click identifiers only. clientId is the GA _ga value; gclid is
-        // the Google Ads click id (opaque token, like ttclid).
+        // Cookie/click identifiers only. clientId is the GA _ga value; gclid is the Google Ads click
+        // id (opaque token, like ttclid).
         foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'gbraid', 'wbraid', 'msclkid', 'oppref', 'obref', 'clientId', 'sessionId') as $key) {
             if (!empty($in[$key]) && is_scalar($in[$key])) {
                 $val = sanitize_text_field(wp_unslash((string) $in[$key]));
@@ -384,8 +348,7 @@ class DFSS_REST
     }
 
     /**
-     * Sanitize commerce context (currency/value/products/...). Caps the number
-     * of products so a hostile payload can't blow up.
+     * Sanitize commerce context (currency/value/products/...).
      *
      * @param array $in
      *
@@ -404,17 +367,10 @@ class DFSS_REST
         if (isset($in['value']) && $this->within($in['value'], self::MAX_VALUE)) {
             $out['value'] = (float) $in['value'];
         }
-        // Net of tax. The purchase goes server-side and never through this
-        // beacon, but the allow-list is the contract for every event: a field
-        // missing here is dropped in silence, which is how a value that IS
-        // being sent still never arrives.
+        // Net of tax.
         if (isset($in['valueNet']) && $this->within($in['valueNet'], self::MAX_VALUE)) {
             $out['valueNet'] = (float) $in['valueNet'];
         }
-        // No orderId: the purchase is server-authoritative and never comes
-        // through here (BEACON_EVENTS), so an order number in a beacon is a
-        // claim nobody verified (audit 2026-09-04, M5). The builder's
-        // allow-list dropped it too; both lists must agree.
         if (isset($in['numItems']) && $this->within($in['numItems'], self::MAX_ITEMS)) {
             $out['numItems'] = (int) $in['numItems'];
         }
@@ -450,15 +406,7 @@ class DFSS_REST
             }
         }
 
-        // Merchandising context (view_item_list / select_item / view_promotion /
-        // select_promotion). Short opaque labels — capped and text-sanitized.
-        // Free-text context that is NOT a label: what the visitor searched for,
-        // and how they got in touch. Capped, and the dispatcher redacts a term
-        // that turns out to be an email address or a phone number.
-        //
-        // This allow-list is the contract for every event on this route: a
-        // field missing here is dropped in SILENCE. The search term was sent
-        // by the tracker and stored nowhere for exactly that reason.
+        // Merchandising context (view_item_list / select_item / view_promotion / select_promotion).
         if (!empty($in['searchString']) && is_scalar($in['searchString'])) {
             $term = sanitize_text_field(wp_unslash((string) $in['searchString']));
             if ($term !== '') {
@@ -484,12 +432,10 @@ class DFSS_REST
         return $out;
     }
 
-    // --- server-trusted context ---------------------------------------------
+    // ---- server-trusted context --------------------------------------------
 
     /**
-     * Identity from the server session only. For a logged-in WooCommerce/WP
-     * user we attach the account email + id; otherwise nothing. Never read from
-     * the browser body.
+     * Identity from the server session only.
      *
      * @return array<string,string>
      */
@@ -509,13 +455,9 @@ class DFSS_REST
     }
 
     /**
-     * Best-effort client IP. We trust REMOTE_ADDR by default; behind a known
-     * proxy WordPress sites typically populate it correctly via a must-use
-     * plugin, so we do NOT blindly trust X-Forwarded-For (spoofable).
-     *
-     * Operators who DO run a trusted reverse proxy / CDN can supply the real
-     * client IP via the `dfss_client_ip` filter, which improves both the rate
-     * limit (per real visitor, not per proxy) and the CAPI IP match quality.
+     * Best-effort client IP. We trust REMOTE_ADDR by default; behind a known proxy WordPress sites
+     * typically populate it correctly via a must-use plugin, so we do NOT blindly trust X-Forwarded-
+     * For (spoofable).
      *
      * @return string
      */
@@ -526,9 +468,8 @@ class DFSS_REST
             : '';
 
         /**
-         * Filter the resolved client IP. Return a valid IP string to override
-         * REMOTE_ADDR when behind a trusted proxy. NEVER read X-Forwarded-For
-         * here without verifying the request actually came from your proxy.
+         * Filter the resolved client IP. Return a valid IP string to override REMOTE_ADDR when behind
+         * a trusted proxy.
          *
          * @param string $ip The IP resolved from REMOTE_ADDR.
          */
@@ -553,48 +494,40 @@ class DFSS_REST
         return substr($ua, 0, 512);
     }
 
-    // --- rate limiting -------------------------------------------------------
+    // ---- rate limiting -----------------------------------------------------
 
     /**
-     * Per-IP rolling-window rate limit using a transient counter, keyed by the
-     * current time bucket so the window auto-rolls. Cheap, no table.
+     * Per-IP rate limit: a transient counter keyed by the current time bucket, so each window starts
+     * clean instead of a busy shared IP staying blocked.
      *
-     * A naive fixed window that re-extends its TTL on every hit would keep a
-     * steady-traffic IP (or a shared NAT/CDN egress IP) blocked indefinitely once
-     * it crossed the cap — silently dropping legitimate beacons. Bucketing the key
-     * by floor(time()/window) means each window has its own counter that simply
-     * expires, so a new window always starts clean.
+     * @param int $weight Number of events to count.
      *
      * @return bool True if the request is within the limit.
      */
-    private function rate_limit_ok()
+    private function rate_limit_ok($weight = 1)
     {
         $ip = $this->client_ip();
         if ($ip === '') {
-            // No IP to key on — let it through (the nonce + size cap still apply).
+            // No IP to key on, let it through (the nonce + size cap still apply).
             return true;
         }
-        // The bucket id changes every RATE_LIMIT_WINDOW seconds; the previous
-        // bucket's transient expires on its own.
+        // The bucket id changes every RATE_LIMIT_WINDOW seconds; the previous bucket's transient
+        // expires on its own.
         $bucket = (int) floor(time() / self::RATE_LIMIT_WINDOW);
         $key = 'dfss_rl_' . $bucket . '_' . md5($ip);
         $count = (int) get_transient($key);
         if ($count >= self::RATE_LIMIT_MAX) {
             return false;
         }
-        // TTL covers the rest of this bucket plus one window of slack so the row
-        // is reaped even if the next request lands at the bucket boundary.
-        set_transient($key, $count + 1, self::RATE_LIMIT_WINDOW * 2);
+        set_transient($key, $count + max(1, (int) $weight), self::RATE_LIMIT_WINDOW * 2);
 
         return true;
     }
 
-    // --- helpers -------------------------------------------------------------
+    // ---- helpers -----------------------------------------------------------
 
     /**
-     * A finite number between 0 and $max inclusive. Anything else (negative,
-     * INF/NAN, "1e300", or plainly out of bounds) fails and the caller drops
-     * the field.
+     * A finite number between 0 and $max inclusive.
      *
      * @param mixed     $v
      * @param int|float $max
@@ -612,8 +545,7 @@ class DFSS_REST
     }
 
     /**
-     * Is this URL on the site's own host (that of home_url())? Compared on
-     * the host only, case-insensitively; scheme, port and path are free.
+     * Is this URL on the site's own host (that of home_url())?
      *
      * @param string $url
      *

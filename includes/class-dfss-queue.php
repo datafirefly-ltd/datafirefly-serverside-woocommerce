@@ -1,21 +1,7 @@
 <?php
 /**
- * DataFirefly Server-Side (WooCommerce) — retry queue + activity log.
- *
- * One lightweight custom table ({$wpdb->prefix}dfss_queue) does double duty:
- *   1. Reliability: any send that fails with a retryable error is recorded and
- *      replayed by the `dfss_retry` WP-cron (every 5 minutes) with exponential
- *      backoff, then dropped after MAX_ATTEMPTS with an admin-visible note.
- *      Zero conversions lost on a brief network/dispatcher outage.
- *   2. Observability: every send attempt (ok or not) leaves a row, so the
- *      "DataFirefly -> Activity" panel reads the last events straight from here.
- *      The table is trimmed to KEEP_ROWS so it can never grow unbounded.
- *
- * We deliberately keep a single table (not Action Scheduler) so the plugin has
- * no hard dependency and stays installable on any WooCommerce 5.0+ shop.
- *
- * Auth/state errors (401/403) are NOT retried — they mean "wrong key" or
- * "tenant suspended", which retrying can never fix; they are logged as failed.
+ * Retry queue and activity log ({prefix}dfss_queue): failed sends are replayed by cron with
+ * backoff; every attempt leaves a row for the Activity panel, trimmed to KEEP_ROWS.
  */
 if (!defined('ABSPATH')) {
     exit;
@@ -26,18 +12,18 @@ class DFSS_Queue
     const CRON_HOOK = 'dfss_retry';
     const MAX_ATTEMPTS = 6;
     const KEEP_ROWS = 200;
-    // Finished rows are kept this long for the Activity panel, then purged
-    // (audit 2026-09-04, M2): the table is a delivery log, not an archive.
+    const TRIM_EVERY = 20;
+    // Finished rows are kept this long for the Activity panel, then purged: the table is a delivery
+    // log, not an archive.
     const PURGE_AFTER = 30 * DAY_IN_SECONDS;
-    // A row claimed by a cron run that died mid-send goes back to pending
-    // after this long (audit 2026-09-04, F4).
+    // A row claimed by a cron run that died mid-send goes back to pending after this long.
     const STALE_CLAIM = 600;
 
     // Status values stored in the `status` column.
     const STATUS_PENDING = 'pending'; // queued, awaiting a retry
     const STATUS_SENDING = 'sending'; // claimed by a cron run, being replayed
     const STATUS_DONE = 'done';       // delivered (2xx)
-    const STATUS_FAILED = 'failed';   // non-retryable (e.g. 401/403) — not retried
+    const STATUS_FAILED = 'failed';   // non-retryable (401/403), never retried
     const STATUS_DROPPED = 'dropped'; // gave up after MAX_ATTEMPTS
 
     /**
@@ -51,7 +37,7 @@ class DFSS_Queue
     }
 
     /**
-     * Create the table. Called on plugin activation (dbDelta = idempotent).
+     * Create the table.
      */
     public static function install()
     {
@@ -60,8 +46,8 @@ class DFSS_Queue
         $table = self::table();
         $charset_collate = $wpdb->get_charset_collate();
 
-        // event_name + event_id are denormalized columns purely so the Activity
-        // panel can render without unserializing every payload.
+        // event_name + event_id are denormalized columns purely so the Activity panel can render
+        // without unserializing every payload.
         $sql = "CREATE TABLE {$table} (
             id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
             event_name VARCHAR(40) NOT NULL DEFAULT '',
@@ -108,11 +94,7 @@ class DFSS_Queue
     }
 
     /**
-     * Record the result of a send attempt.
-     *
-     * On success: a 'done' row (observability only).
-     * On a retryable failure: a 'pending' row with a backed-off next_attempt.
-     * On a non-retryable failure (401/403): a 'failed' row, never retried.
+     * Record a send attempt: 'done' on success, 'pending' with backoff if retryable, 'failed' on 401/403.
      *
      * @param array  $payload The IncomingEvent that was (attempted to be) sent.
      * @param array  $result  DFSS_Client::send() result {ok,code,message}.
@@ -127,7 +109,7 @@ class DFSS_Queue
 
         if ($ok) {
             self::insert_row($payload, self::STATUS_DONE, 1, 0, $code, '', $origin);
-            self::trim();
+            self::maybe_trim();
 
             return;
         }
@@ -142,7 +124,7 @@ class DFSS_Queue
                 self::clip($result),
                 $origin
             );
-            self::trim();
+            self::maybe_trim();
 
             return;
         }
@@ -157,11 +139,11 @@ class DFSS_Queue
             self::clip($result),
             $origin
         );
-        self::trim();
+        self::maybe_trim();
     }
 
     /**
-     * Replay due pending rows. Invoked by the dfss_retry cron.
+     * Replay due pending rows.
      *
      * @param string $tenant_id
      * @param string $hmac_secret
@@ -174,15 +156,13 @@ class DFSS_Queue
         global $wpdb;
 
         if ($tenant_id === '' || $hmac_secret === '' || $endpoint === '') {
-            return; // not connected — leave the queue intact
+            return; // not connected: leave the queue intact
         }
 
         $table = self::table();
         $now = time();
 
-        // Finished rows carry no payload any more (see insert_row), but their
-        // event ids and codes are still a trace of who bought what and when;
-        // thirty days is what the Activity panel needs, not more.
+        // Purge finished rows past PURGE_AFTER.
         $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
             $wpdb->prepare(
                 "DELETE FROM {$table} WHERE status NOT IN (%s, %s) AND created_at < %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -192,9 +172,7 @@ class DFSS_Queue
             )
         );
 
-        // A claim that never resolved (PHP killed mid-request, fatal in the
-        // send) would otherwise sit in 'sending' for ever, and the conversion
-        // with it. Hand it back to the queue after STALE_CLAIM.
+        // Hand back claims that never resolved (PHP killed mid-send).
         $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
             $wpdb->prepare(
                 "UPDATE {$table} SET status = %s, next_attempt = %d, updated_at = %d WHERE status = %s AND updated_at < %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -215,17 +193,16 @@ class DFSS_Queue
             )
         );
         if (empty($rows)) {
+            self::trim();
+
             return;
         }
 
         $client = new DFSS_Client($tenant_id, $hmac_secret, $endpoint);
 
         foreach ($rows as $row) {
-            // Atomic claim: two overlapping cron runs (WP-Cron fires on traffic
-            // and does not lock across requests) both selected this row; only
-            // the UPDATE that flips it from pending wins, and the other run
-            // skips it instead of replaying the same purchase twice (audit
-            // 2026-09-04, F4). $wpdb->query() returns the rows affected.
+            // Atomic claim: WP-Cron does not lock, so two overlapping runs may select the same row;
+            // only the UPDATE that flips it from pending wins.
             $claimed = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
                 $wpdb->prepare(
                     "UPDATE {$table} SET status = %s, updated_at = %d WHERE id = %d AND status = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -241,7 +218,7 @@ class DFSS_Queue
 
             $payload = json_decode((string) $row->payload, true);
             if (!is_array($payload)) {
-                // Corrupt row — drop it so it can't loop forever.
+                // Corrupt row, drop it so it can't loop forever.
                 self::update_status((int) $row->id, self::STATUS_DROPPED, (int) $row->attempts, 0, 0, 'corrupt_payload');
                 continue;
             }
@@ -265,7 +242,7 @@ class DFSS_Queue
                 continue;
             }
 
-            // Still retryable — back off further.
+            // Still retryable, back off further.
             self::update_status(
                 (int) $row->id,
                 self::STATUS_PENDING,
@@ -335,10 +312,10 @@ class DFSS_Queue
         );
     }
 
-    // --- internals -----------------------------------------------------------
+    // ---- internals ---------------------------------------------------------
 
     /**
-     * @param array  $payload
+     * @param array $payload
      * @param string $status
      * @param int    $attempts
      * @param int    $next_attempt
@@ -351,16 +328,12 @@ class DFSS_Queue
         global $wpdb;
 
         $now = time();
-        // Only a row that will be replayed needs its payload. A delivered or
-        // rejected event kept every billing field (email, phone, address) in
-        // the shop database for as long as the row survived the trim, for no
-        // purpose but the Activity panel, which reads the denormalized
-        // columns (audit 2026-09-04, M2).
+        // Only a row that will be replayed needs its payload.
         $encoded = $status === self::STATUS_PENDING
             ? wp_json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
             : '{}';
         if ($encoded === false) {
-            return; // cannot persist — skip silently (caller already attempted send)
+            return; // cannot persist: skip silently (caller already attempted send)
         }
 
         $wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- state write to the plugin's own retry-queue table; caching does not apply.
@@ -383,7 +356,7 @@ class DFSS_Queue
     }
 
     /**
-     * @param int    $id
+     * @param int $id
      * @param string $status
      * @param int    $attempts
      * @param int    $next_attempt
@@ -403,8 +376,7 @@ class DFSS_Queue
             'updated_at' => time(),
         );
         $format = array('%s', '%d', '%d', '%d', '%s', '%d');
-        // Leaving the queue for good: the payload has done its job, drop the
-        // personal data with it (audit 2026-09-04, M2).
+        // Leaving the queue for good: the payload has done its job, drop the personal data with it.
         if ($status !== self::STATUS_PENDING && $status !== self::STATUS_SENDING) {
             $data['payload'] = '{}';
             $format[] = '%s';
@@ -420,9 +392,18 @@ class DFSS_Queue
     }
 
     /**
+     * Trim on about one write in TRIM_EVERY: the log cap is soft between cron runs, and the hot path
+     * saves two queries per event. The cron trims on every run.
+     */
+    private static function maybe_trim()
+    {
+        if (mt_rand(1, self::TRIM_EVERY) === 1) { // phpcs:ignore WordPress.WP.AlternativeFunctions.rand_mt_rand -- sampling, not security.
+            self::trim();
+        }
+    }
+
+    /**
      * Keep only the most recent KEEP_ROWS rows (circular log behaviour).
-     * Pending and claimed rows are always preserved so a trim can't drop a
-     * not-yet-retried conversion.
      */
     private static function trim()
     {
@@ -430,8 +411,7 @@ class DFSS_Queue
 
         $table = self::table();
 
-        // The id below which non-pending rows may be pruned: the KEEP_ROWS-th
-        // newest id overall.
+        // The id below which non-pending rows may be pruned: the KEEP_ROWS-th newest id overall.
         $cutoff = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
             $wpdb->prepare(
                 "SELECT id FROM {$table} ORDER BY id DESC LIMIT 1 OFFSET %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -439,7 +419,7 @@ class DFSS_Queue
             )
         );
         if ($cutoff === null) {
-            return; // fewer than KEEP_ROWS rows — nothing to prune
+            return; // fewer than KEEP_ROWS rows: nothing to prune
         }
 
         $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
@@ -453,8 +433,8 @@ class DFSS_Queue
     }
 
     /**
-     * Exponential backoff in seconds for a given attempt number (1-based),
-     * capped at 1 hour. 1->5min, 2->10min, 3->20min, 4->40min, 5+->60min.
+     * Exponential backoff in seconds for a given attempt number (1-based), capped at 1 hour. 1->5min,
+     * 2->10min, 3->20min, 4->40min, 5+->60min.
      *
      * @param int $attempt
      *
@@ -480,9 +460,7 @@ class DFSS_Queue
     }
 
     /**
-     * Short, PII-free error string for storage. We only keep the HTTP code and
-     * a clipped dispatcher message (which is an error key like
-     * "invalid_signature", never customer data).
+     * Short, PII-free error string for storage.
      *
      * @param array $result
      *

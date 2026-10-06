@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.27.0
+Stable tag: 2.28.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -16,7 +16,8 @@ DataFirefly Server-Side delivers complete, reliable WooCommerce conversion track
 
 * **Full funnel** — page view, product view, add to cart, initiate checkout, add payment info, purchase.
 * **Dual delivery, deduplicated** — every event fires a light client pixel (Meta / GA4 / TikTok) **and** a signed server-side event sharing the same event id, so ad blockers never cost you a conversion and nothing is ever counted twice.
-* **Per-destination control** — enable or disable the Meta, GA4 and TikTok client tags individually. A disabled destination's third-party script (and its cookies) is never loaded in your visitors' browsers.
+* **Per-destination control**: enable or disable the Meta, GA4, Google Ads, TikTok and OpenAI browser tags individually. A disabled platform's code is not sent to the browser at all, and its third-party script and cookies never load.
+* **Light on the storefront**: deferred, minified scripts, only the modules you use, and page-load events sent in a single request.
 * **GDPR-aware** — nothing fires until marketing consent is granted. Recognised without configuration: DataFirefly Cookie Consent, WP Consent API, Complianz, Cookiebot, IAB TCF v2, Didomi, Usercentrics, CookieYes, Iubenda, OneTrust, Cookiehub, Osano, Borlabs, Klaro, tarteaucitron — in the browser and on the server, the same list as the PrestaShop and Shopware modules.
 * **Reliable** — failed sends are queued and retried with exponential backoff; an Activity panel shows delivery status live.
 * **Secure by design** — no destination credential ever reaches the browser; the HMAC secret never leaves the server; the public beacon endpoint is rate-limited, size-capped and strictly sanitized; purchase events are server-authoritative and cannot be spoofed.
@@ -45,19 +46,33 @@ DataFirefly then forwards the events, on your behalf and according to what you e
 1. Upload the plugin and activate it.
 2. Go to Settings → DataFirefly Server-Side.
 3. Paste the connection key from your DataFirefly client space and click Connect. That is the only step.
-4. Optional: in the same screen, untick any client destination (Meta, GA4, TikTok) you do not use.
+4. Optional: in the same screen, untick any browser tag (Meta, GA4, Google Ads, TikTok, OpenAI) you do not use, and the lead and engagement events if your site does not need them.
 
 == Frequently Asked Questions ==
 
 = Does the plugin load Facebook / TikTok / Google scripts on my shop? =
 
-Only for the destinations that are both configured on your DataFirefly account **and** enabled in the "Client destinations" setting. Untick a destination and its script will never be injected.
+Only for the platforms that are both configured on your DataFirefly account **and** enabled in the "Browser tags" setting. Untick one and its code is not even sent to the browser.
+
+= Does the plugin slow my storefront down? =
+
+The core tracker is about 10 KB compressed, loaded deferred in the footer. Each platform tag is a separate small file loaded only when enabled, and the lead and engagement events can be switched off. Page-load events go to your server in one request instead of one per event.
 
 = Is consent respected? =
 
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.28.0 =
+* New: Google Ads and OpenAI (ChatGPT Ads) browser tags can now be switched off, like Meta, GA4 and TikTok.
+* New: a switched-off platform's code is no longer shipped at all. Meta, TikTok and OpenAI tags are separate files, enqueued only when enabled and configured.
+* New: "Lead and engagement events" setting (contact, booking, share, trial, newsletter, application, tagged donate and store-locator buttons). On by default; off, its script is not loaded.
+* Performance: the tracker no longer sends the server events its endpoint always refused (view_cart, contact, share, add_to_wishlist and nine others). Each one booted WordPress for nothing; the browser tags still receive them.
+* Performance: page-load events (page view, product view, list...) go out in one request instead of one per event. The endpoint accepts a batch of up to 10 events, each rate-limited, sanitized, sent and recorded on its own.
+* Performance: minified builds (core tracker 109 KB down to 33 KB, 10 KB compressed), deferred loading, options cached per request, the cron check no longer runs on storefront pages, and the activity log is trimmed on about one write in twenty instead of every write.
+* Fix: the admin script never loaded on the settings screen (slug mismatch).
+* Code: comments shortened and translated to English, except inside the blocks generated by the shared sync scripts.
 
 = 2.27.0 =
 * The plugin now uses its wordpress.org identifier everywhere: folder datafirefly-server-side, text domain datafirefly-server-side. Copies downloaded from the DataFirefly client space until 2.26.x used the folder datafirefly-serverside, which WordPress treats as a different plugin. Activating 2.27.0 on such a shop switches the older copy off and keeps every setting; the older copy can then be deleted from the Plugins screen without losing the connection, because its uninstall no longer takes the shared settings with it.
@@ -140,6 +155,9 @@ Yes. When "Require consent" is on (default), no tag is injected and no event is 
 * Server-side purchase event delivery.
 
 == Upgrade Notice ==
+
+= 2.28.0 =
+Every browser tag stays enabled on upgrade: nothing changes until you untick one.
 
 = 2.27.0 =
 If you installed the plugin from the DataFirefly client space (folder datafirefly-serverside), install and activate this version first: it takes over with the same settings. Then delete the older copy.

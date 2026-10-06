@@ -1,21 +1,10 @@
-/**
- * DataFirefly Server-Side — admin helper (Activity panel).
- *
- * Tiny, dependency-free. Two jobs:
- *   1. Reveal the "advanced credentials" block on the connect screen.
- *   2. Auto-refresh the Activity table every 30s by re-fetching the page's
- *      table fragment via the admin-ajax endpoint, so the operator sees new
- *      events without a manual reload. Falls back silently if anything is off.
- *
- * The data itself is rendered server-side (escaped in PHP); this only swaps the
- * table body HTML it receives from our own nonce-protected ajax action.
- */
+/** DataFirefly Server-Side admin: advanced-credentials toggle and 30 s Activity auto-refresh. */
 (function () {
 	'use strict';
 
 	var CFG = window.DFSS_ADMIN || {};
 
-	// 1. Advanced block toggle (progressive enhancement of the inline link).
+	// Reveal the advanced credentials form.
 	function wireAdvancedToggle() {
 		var link = document.querySelector('[data-dfss-toggle-advanced]');
 		var box = document.getElementById('dfss-adv');
@@ -29,7 +18,7 @@
 		});
 	}
 
-	// 2. Activity auto-refresh.
+	// Refresh the Activity table body every 30 s while the tab is visible.
 	function wireActivityRefresh() {
 		var tbody = document.getElementById('dfss-activity-rows');
 		if (!tbody || !CFG.ajaxUrl || !CFG.nonce) {
@@ -50,7 +39,6 @@
 				.catch(function () {});
 		}
 
-		// Refresh every 30s while the tab is visible.
 		setInterval(function () {
 			if (document.visibilityState === 'visible') {
 				refresh();

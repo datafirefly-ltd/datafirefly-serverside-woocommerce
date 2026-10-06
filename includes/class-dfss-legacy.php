@@ -1,26 +1,7 @@
 <?php
 /**
- * The copy of this plugin distributed before 2.27.0.
- *
- * Until 2.26.x the DataFirefly client space shipped this plugin in a folder
- * named "datafirefly-serverside". Its wordpress.org identifier, which cannot
- * change, is "datafirefly-server-side", and WordPress treats two folders as
- * two plugins: installing 2.27.0 on such a shop puts a second copy next to
- * the first instead of updating it.
- *
- * Both copies store their settings under the same option names, so nothing
- * has to be migrated. Two things do need care:
- *
- * - the older copy's uninstall.php deletes those shared settings (tenant id
- *   and HMAC secret included), the retry table and the cron hooks. Deleting
- *   the older copy from the Plugins screen, which is what the notice below
- *   invites, would leave this copy unconfigured. The settings and the pending
- *   retries are therefore set aside just before that uninstall runs and put
- *   back just after;
- * - the merchant has to be told the older copy is still there.
- *
- * Switching the older copy off happens in the main file, before any class is
- * declared: see the guard at the top of datafirefly-server-side.php.
+ * The pre-2.27.0 copy (folder "datafirefly-serverside"): its uninstall would delete the shared
+ * settings, so they and the pending retries are set aside before it runs and restored after.
  *
  * @package DataFirefly_ServerSide
  */
@@ -31,13 +12,19 @@ if (!defined('ABSPATH')) {
 
 class DFSS_Legacy
 {
-    /** Plugin basename of the pre-2.27.0 copy. */
+    /**
+     * Plugin basename of the pre-2.27.0 copy.
+     */
     const BASENAME = 'datafirefly-serverside/datafirefly-serverside.php';
 
-    /** Options the older copy's uninstall.php deletes. */
+    /**
+     * Options the older copy's uninstall.php deletes.
+     */
     const OPTIONS = array('dfss_settings', 'dfss_public_config', 'dfss_version', 'dfss_truth_last_date');
 
-    /** @var array|null what was set aside before the older copy's uninstall */
+    /**
+     * @var array|null what was set aside before the older copy's uninstall
+     */
     private static $saved = null;
 
     public static function register()

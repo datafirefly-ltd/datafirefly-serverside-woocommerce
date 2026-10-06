@@ -1,15 +1,6 @@
 <?php
 /**
- * DataFirefly Server-Side (WooCommerce) — event builder.
- *
- * Maps a WooCommerce order to the dispatcher's IncomingEvent shape. Built
- * defensively: each optional field is added only when present and valid,
- * because the dispatcher validates strictly (Zod) and rejects the whole event
- * on a single bad field (email format, country 2 chars, currency 3 chars).
- *
- * Browser identifiers (_fbp/_fbc/_ga/_ttp) are read from order meta captured at
- * checkout — the purchase hook can fire from a gateway callback with no cookie
- * context, so we never rely on $_COOKIE here.
+ * Event builder: maps orders and sanitized beacons to the dispatcher event shape.
  */
 if (!defined('ABSPATH')) {
     exit;
@@ -18,18 +9,8 @@ if (!defined('ABSPATH')) {
 class DFSS_Event_Builder
 {
     /**
-     * The event names the PUBLIC beacon endpoint accepts from the browser.
-     *
-     * Deliberately EXCLUDES 'purchase': the purchase conversion is delivered
-     * server-side by the authoritative WooCommerce order hook (build_purchase —
-     * not spoofable) and client-side by the injected pixel, both keyed on
-     * "order_<id>" so they deduplicate. Accepting 'purchase' on a public,
-     * soft-nonce endpoint would let anyone inject fake conversions — inflating a
-     * merchant's Meta/GA revenue and poisoning ad optimization. It also omits the
-     * events the tracker never emits (lead/complete_registration/search), keeping
-     * the public attack surface to exactly the top-of-funnel events we send.
-     *
-     * Note: the spec's "view_item" maps to the schema's "view_content".
+     * Events the public beacon endpoint accepts. No 'purchase': it is sent server-side from the
+     * order hook, so it cannot be spoofed. The tracker reads this list and beacons nothing else.
      *
      * @var string[]
      */
@@ -49,35 +30,8 @@ class DFSS_Event_Builder
     );
 
     /**
-     * Build a dispatcher event from a sanitized client beacon.
-     *
-     * The REST endpoint (class-dfss-rest.php) sanitizes every raw field before
-     * calling this; here we shape + validate into the dispatcher's IncomingEvent
-     * with the SAME defensive discipline as build_purchase(): each optional
-     * field is added only when present and valid, because the dispatcher
-     * validates strictly (Zod) and rejects the whole event on a single bad field.
-     *
-     * The full server context (IP, user agent) is added server-side here so the
-     * browser never has to send it — and so it is always present even when the
-     * beacon is sparse.
-     *
-     * @param array  $beacon Sanitized beacon: {
-     *     event_id, event_name, source_url, user_data:array, event_data:array }
-     * @param string $client_ip   Resolved server-side (REST request IP).
-     * @param string $client_ua   Resolved server-side (request user agent).
-     *
-     * @return array|null Null if the beacon can't be mapped (caller drops it).
-     */
-
-    /**
-     * What the shop's consent layer decided for this event.
-     *
-     * We only build a payload once has_consent() said yes, but that yes covers
-     * two different situations: gating is ON and the visitor accepted, or
-     * gating is switched OFF and nothing was checked. Reporting both as
-     * 'granted' would make the field false exactly where it exists to be
-     * verifiable. The option is read through DFSS_Consent::is_required() so the
-     * "ON by default on a fresh install" rule stays in one place.
+     * What the consent layer decided: 'granted' when gating is on (the beacon passed it), else
+     * 'not_required'.
      *
      * @return string 'granted'|'not_required'
      */
@@ -90,11 +44,21 @@ class DFSS_Event_Builder
             : 'not_required';
     }
 
+    /**
+     * Build a dispatcher event from a sanitized client beacon. Optional fields are added only when
+     * valid: the dispatcher rejects the whole event on a single bad field.
+     *
+     * @param array  $beacon Sanitized beacon: {
+     *     event_id, event_name, source_url, user_data:array, event_data:array }
+     * @param string $client_ip   Resolved server-side (REST request IP).
+     * @param string $client_ua   Resolved server-side (request user agent).
+     *
+     * @return array|null Null if the beacon can't be mapped (caller drops it).
+     */
     public static function build_from_beacon(array $beacon, $client_ip = '', $client_ua = '')
     {
         $event_name = isset($beacon['event_name']) ? (string) $beacon['event_name'] : '';
-        // Beacon-accepted events only — purchase is server-authoritative (see
-        // BEACON_EVENTS), so a beaconed 'purchase' is dropped here.
+        // Beacon-accepted events only: a beaconed 'purchase' is dropped (it is server-authoritative).
         if (!in_array($event_name, self::BEACON_EVENTS, true)) {
             return null;
         }
@@ -107,8 +71,6 @@ class DFSS_Event_Builder
         }
 
         $source_url = isset($beacon['source_url']) ? (string) $beacon['source_url'] : '';
-        // sourceUrl must satisfy the dispatcher's z.string().url(); validate the
-        // shape (not reachability — we never fetch it) and fall back to home.
         if ($source_url === '' || !filter_var($source_url, FILTER_VALIDATE_URL)) {
             $source_url = home_url('/');
         }
@@ -127,16 +89,15 @@ class DFSS_Event_Builder
             ),
         );
 
-        // Referring URL — optional; only forward when it satisfies the
-        // dispatcher's z.string().url() (pageReferrer). GA4 uses it to derive
-        // source/medium when no client-side session exists.
+        // Referring URL, optional; only forward when it satisfies the dispatcher's z.string().url()
+        // (pageReferrer).
         $page_referrer = isset($beacon['page_referrer']) ? (string) $beacon['page_referrer'] : '';
         if ($page_referrer !== '' && filter_var($page_referrer, FILTER_VALIDATE_URL)) {
             $payload['pageReferrer'] = $page_referrer;
         }
 
-        // Consent Mode advanced: the GA4 tag already sent this event, the
-        // dispatcher must not send it again by Measurement Protocol.
+        // Consent Mode advanced: the GA4 tag already sent this event, the dispatcher must not send it
+        // again by Measurement Protocol.
         if (!empty($beacon['browser_sent']) && is_array($beacon['browser_sent'])) {
             $payload['browserSent'] = array_values($beacon['browser_sent']);
         }
@@ -154,12 +115,6 @@ class DFSS_Event_Builder
     /**
      * Shape the userData object of a beacon into schema-valid fields.
      *
-     * Only the dispatcher's known userData keys are emitted. The browser never
-     * sends PII for top-of-funnel events (we have no email until checkout), so
-     * this is mostly browser identifiers + the server-resolved IP/UA. If a
-     * logged-in customer is known, the REST layer may inject email/externalId
-     * (it does so server-side, never trusting the browser for identity).
-     *
      * @param array  $in        Sanitized user_data from the beacon.
      * @param string $client_ip Server-resolved request IP.
      * @param string $client_ua Server-resolved request user agent.
@@ -170,17 +125,15 @@ class DFSS_Event_Builder
     {
         $u = array();
 
-        // Browser identifiers (cookies + click ids) — passed raw end-to-end.
-        // Each is a free string in the schema; only emit when non-empty.
-        // gclid is the Google Ads click id (opaque token, like ttclid).
+        // Browser identifiers (cookies + click ids), passed raw end-to-end.
         foreach (array('fbp', 'fbc', 'ttp', 'ttclid', 'gclid', 'gbraid', 'wbraid', 'msclkid', 'oppref', 'obref', 'clientId', 'sessionId') as $key) {
             if (!empty($in[$key]) && is_string($in[$key])) {
                 $u[$key] = $in[$key];
             }
         }
 
-        // Server-trusted identity, injected by the REST layer for logged-in
-        // users only (never read from the browser payload).
+        // Server-trusted identity, injected by the REST layer for logged-in users only (never read
+        // from the browser payload).
         if (!empty($in['email']) && is_string($in['email']) && is_email($in['email'])) {
             $u['email'] = $in['email'];
         }
@@ -188,7 +141,7 @@ class DFSS_Event_Builder
             $u['externalId'] = $in['externalId'];
         }
 
-        // Server-resolved context — authoritative, not from the browser body.
+        // Server-resolved context, authoritative, not from the browser body.
         if ($client_ua !== '') {
             $u['clientUserAgent'] = $client_ua;
         }
@@ -213,15 +166,10 @@ class DFSS_Event_Builder
         if (!empty($in['currency']) && is_string($in['currency']) && strlen($in['currency']) === 3) {
             $d['currency'] = strtoupper($in['currency']);
         }
-        // Guard against INF/NAN (e.g. "1e400") — the dispatcher's z.number()
-        // rejects non-finite values and would drop the WHOLE event.
+        // A non-finite value (INF/NAN) would make the dispatcher reject the whole event.
         if (isset($in['value']) && self::is_finite_number($in['value']) && (float) $in['value'] >= 0) {
             $d['value'] = round((float) $in['value'], 2);
         }
-        // No orderId here: the purchase never comes through the beacon (see
-        // BEACON_EVENTS), so an order number in a browser payload can only be
-        // a claim nobody verified. Dropped at the route too (audit 2026-09-04,
-        // M5); the two allow-lists must agree.
 
         $products = array();
         if (!empty($in['products']) && is_array($in['products'])) {
@@ -257,21 +205,14 @@ class DFSS_Event_Builder
             $d['numItems'] = (int) $in['numItems'];
         }
 
-        // The visitor's own words, and how they got in touch. Capped here as
-        // well as at the route: this file is the SECOND allow-list on the same
-        // payload — the route sanitizes, this builds what actually leaves —
-        // and a field added to one and not the other is dropped in silence.
-        // That is precisely what happened to searchString: added at the route,
-        // missing here, and the term arrived empty in production.
+        // The visitor's own words, and how they got in touch.
         foreach (array('searchString' => 200, 'method' => 40) as $fk => $max) {
             if (!empty($in[$fk]) && is_string($in[$fk])) {
                 $d[$fk] = mb_substr($in[$fk], 0, $max);
             }
         }
 
-        // Merchandising context (view_item_list / select_item / view_promotion /
-        // select_promotion). GA4-native list & promotion reporting; other
-        // destinations ignore these keys.
+        // Merchandising context (view_item_list / select_item / view_promotion / select_promotion).
         foreach (array('listId', 'listName', 'promotionId', 'promotionName', 'creativeName', 'creativeSlot') as $mk) {
             if (!empty($in[$mk]) && is_string($in[$mk])) {
                 $d[$mk] = mb_substr($in[$mk], 0, 200);
@@ -282,22 +223,7 @@ class DFSS_Event_Builder
     }
 
     /**
-     * The id to report for an order line: the VARIATION when the line has one.
-     *
-     * `WC_Order_Item_Product::get_product_id()` returns the PARENT of a
-     * variable product, never the variation. Every other step of the funnel
-     * already reports the variation: the add-to-cart form sends
-     * `variation_id`, and the cart, checkout and payment contexts read
-     * `$item['data']->get_id()`, which on a cart line IS the
-     * WC_Product_Variation. Purchase was the only step reporting the parent.
-     *
-     * So on any shop selling sizes or colours, the product that was added was
-     * never the product that was bought: the funnel split in two at the last
-     * step, adds landing on one row of the console and purchases on another,
-     * and the conversion reaching Meta and GA4 with ids that match neither the
-     * add-to-cart events nor the variation lines of the merchant's feed.
-     *
-     * Nothing changes for a simple product: get_variation_id() returns 0.
+     * The id to report for an order line: the variation when there is one, else the product.
      *
      * @param WC_Order_Item_Product $item
      *
@@ -311,30 +237,8 @@ class DFSS_Event_Builder
     }
 
     /**
-     * The same record's id in the shop's DEFAULT language, when a translation
-     * layer splits one product across several posts.
-     *
-     * WPML and Polylang do not translate a product in place: each language is
-     * its own post, with its own id. Nothing downstream can tell that two ids
-     * are one product, so the console counted each language separately and
-     * every language showed a fraction of the real figure. On our own shop,
-     * 5127 "Module de recherche avancee" and 5128 "Advanced Search Module"
-     * are one module.
-     *
-     * Resolved HERE, in PHP, rather than in the browser: this is the only
-     * place the translation plugin's API exists, and doing it in the event
-     * builder covers every product line at once - the ones the page sent us
-     * and the ones we build ourselves from an order.
-     *
-     * The product's own `id` is deliberately left untouched. It is what the
-     * advertising platforms match against the merchant's product feed, and a
-     * multilingual feed carries the per-language ids: folding them there would
-     * break catalogue matching to fix a reporting problem.
-     *
-     * Returns '' when there is nothing to fold - no translation plugin, an id
-     * that is not a post (a SKU, a bare string), or a product that already IS
-     * the default-language one. The caller then sends no grouping key and the
-     * dispatcher groups on the plain id exactly as it always has.
+     * The same record's id in the shop's DEFAULT language, when a translation layer splits one product
+     * across several posts.
      *
      * @param string $id
      *
@@ -352,11 +256,8 @@ class DFSS_Event_Builder
             return $memo[$id];
         }
 
-        // Content lines carry a "<post_type>-<id>" id (see the content list in
-        // the main plugin file); products carry a bare numeric one. Both are
-        // translated, so both are folded - an institutional site running
-        // Polylang splits its articles exactly the way a shop splits its
-        // products.
+        // Content lines carry a "<post_type>-<id>" id (see the content list in the main plugin file);
+        // products carry a bare numeric one.
         $prefix = '';
         $post_id = 0;
         if (ctype_digit($id)) {
@@ -384,12 +285,8 @@ class DFSS_Event_Builder
             }
         }
 
-        // WPML. `true` as the fourth argument means "return the original when
-        // this object has no translation in that language", which is what we
-        // want: a product the merchant never translated is its own group.
-        // PrefixAllGlobals asks a plugin to prefix the hooks it CREATES. These two
-        // are not ours: they are WPML's public API, and calling them is the only
-        // documented way to ask WPML for the original of a translated object.
+        // WPML. `true` returns the original when there is no translation. These two filters are
+        // WPML's public API, not hooks of ours, hence the prefix sniff is disabled.
         // phpcs:disable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
         if ($canonical === 0 && has_filter('wpml_object_id')) {
             $default = apply_filters('wpml_default_language', null);
@@ -415,8 +312,7 @@ class DFSS_Event_Builder
     }
 
     /**
-     * True if the value is numeric AND finite (not INF/NAN). The dispatcher's
-     * z.number() rejects non-finite values; a single one rejects the whole event.
+     * True if the value is numeric AND finite (not INF/NAN).
      *
      * @param mixed $v
      *
@@ -428,22 +324,7 @@ class DFSS_Event_Builder
     }
 
     /**
-     * @param WC_Order $order
-     *
-     * @return array|null Null if the order can't be mapped (caller skips send).
-     */
-    /**
-     * Build the `refund` event from a WooCommerce refund object.
-     *
-     * Carries NO personal data, unlike build_purchase(). A refund reverses a
-     * CONVERSION, and every platform that can act on one matches it by
-     * transaction id: GA4 keys its `refund` event on `transaction_id`, and
-     * Meta skips refunds because it has no purchase-reversal event. Nobody
-     * needs identifying again to undo a sale, so nobody is.
-     *
-     * The amount is POSITIVE. WooCommerce stores refund totals as negative
-     * numbers; the event name already carries the direction, and a negative on
-     * top of it is a double negative each platform resolves differently.
+     * Build the `refund` event: no personal data, positive amount, keyed on the refund id.
      *
      * @param WC_Order_Refund $refund
      * @param WC_Order        $order
@@ -465,17 +346,14 @@ class DFSS_Event_Builder
         $event_time = $created ? $created->getTimestamp() : time();
 
         return array(
-            // The refund id, not the order id: two partial refunds on one
-            // order are two real events.
+            // The refund id, not the order id: two partial refunds on one order are two real events.
             'eventId' => 'refund_' . (int) $refund->get_id(),
             'eventName' => 'refund',
             'eventTime' => $event_time,
             'sourceUrl' => home_url('/'),
-            // Not 'website': nobody was on the site. A back-office correction.
+            // Not 'website': nobody was on the site.
             'actionSource' => 'system_generated',
-            // No personal data and no visitor to ask, so nothing for a consent
-            // gate to decide. Saying 'granted' would claim an agreement nobody
-            // ever gave.
+            // No personal data and no visitor to ask, so nothing for a consent gate to decide.
             'consent' => 'not_required',
             'eventData' => array(
                 'value' => round($amount, 2),
@@ -485,6 +363,14 @@ class DFSS_Event_Builder
         );
     }
 
+    /**
+     * Build the purchase event. A refused consent strips the personal data but still reports the
+     * sale, with consent 'denied', so the dispatcher records it without forwarding it.
+     *
+     * @param WC_Order $order
+     *
+     * @return array|null Null if the order can't be mapped (caller skips send).
+     */
     public static function build_purchase($order)
     {
         if (!$order instanceof WC_Order) {
@@ -494,19 +380,6 @@ class DFSS_Event_Builder
         $created = $order->get_date_created();
         $event_time = $created ? $created->getTimestamp() : time();
 
-        // Audit 2026-09-04 (M1): the purchase used to carry every billing
-        // field and say 'granted' without ever asking. The verdict now comes
-        // from the order itself (see purchase_consent()); a refusal strips the
-        // event down to the sale.
-        //
-        // Since dispatcher 0.64.0 the schema knows 'denied', so a refusal is
-        // now SAID rather than left out. It used to send no consent field at
-        // all, which the dispatcher read as 'unknown': a shopper who had
-        // explicitly refused was indistinguishable from a shop that never
-        // asked, and the event was forwarded to the platforms all the same.
-        // A refused event is still sent here, because the sale is real and the
-        // merchant needs his denominator; the dispatcher records it and stops
-        // it there instead of forwarding it.
         $verdict = self::purchase_consent($order);
 
         $payload = array(
@@ -529,15 +402,6 @@ class DFSS_Event_Builder
 
     /**
      * The consent verdict that applies to an order's purchase event.
-     *
-     * The verdict was read from the shopper's cookies at checkout and stored
-     * as order meta (_dfss_consent, see DFSS_Plugin::capture_cookies()),
-     * because the purchase hook can run later from a gateway webhook where
-     * there is no browser to ask. Absent meta means the order was not created
-     * by the classic checkout (back office, API, blocks): a request with the
-     * shopper's cookies may still answer, an admin's cookies must not (they
-     * are the merchant's consent, not the customer's), and no signal is a
-     * refusal, as in the browser gate.
      *
      * @param WC_Order $order
      *
@@ -629,9 +493,7 @@ class DFSS_Event_Builder
         if ($ttp) {
             $u['ttp'] = $ttp;
         }
-        // Click identifiers captured at checkout (see capture_cookies()). The
-        // dispatcher picks the Google one it can use (gclid > wbraid > gbraid)
-        // and forwards msclkid to Microsoft Advertising.
+        // Click identifiers captured at checkout (see capture_cookies()).
         foreach (array('ttclid', 'gclid', 'gbraid', 'wbraid', 'msclkid') as $click_id) {
             $value = $order->get_meta('_dfss_' . $click_id);
             if ($value) {
@@ -651,9 +513,7 @@ class DFSS_Event_Builder
         if ($client_id !== '') {
             $u['clientId'] = $client_id;
         }
-        // GA4 session id captured at checkout (_ga_<container> cookie). Stitches
-        // the purchase onto the converting session so GA4 credits its real
-        // source/medium instead of reporting the conversion as "Unassigned".
+        // GA4 session id captured at checkout (_ga_<container> cookie).
         $session_id = self::ga_session_id($order->get_meta('_dfss_ga_session'));
         if ($session_id !== '') {
             $u['sessionId'] = $session_id;
@@ -676,12 +536,7 @@ class DFSS_Event_Builder
             $d['currency'] = strtoupper($currency);
         }
         $d['value'] = round((float) $order->get_total(), 2);
-        // The same order net of tax. `value` stays what the customer was
-        // charged, because that is what the ad platforms optimise on; this is
-        // what the merchant reads in their own books, and for a B2B shop
-        // selling downloads it is the only figure that means anything. Sent
-        // rather than derived: a total says nothing about how much of it was
-        // tax, and a shop with mixed rates cannot be guessed at.
+        // The same order net of tax.
         $d['valueNet'] = round((float) $order->get_total() - (float) $order->get_total_tax(), 2);
         $d['orderId'] = (string) $order->get_order_number();
 
@@ -705,11 +560,8 @@ class DFSS_Event_Builder
             if ($qty > 0) {
                 $line['quantity'] = $qty;
             }
-            // WC_Order::get_total() is the order total WITH tax; on an order
-            // ITEM the identically-named method is the line NET of tax. Same
-            // name, opposite basis. Using it raw here made the product lines
-            // tax-exclusive while the headline above was tax-inclusive, so the
-            // two never added up — the same divergence the page context had.
+            // WC_Order::get_total() is the order total WITH tax; on an order ITEM the identically-
+            // named method is the line NET of tax.
             $line_total = (float) $item->get_total() + (float) $item->get_total_tax();
             $line['price'] = $qty > 0 ? round($line_total / $qty, 2) : round($line_total, 2);
             $products[] = $line;
@@ -724,7 +576,6 @@ class DFSS_Event_Builder
 
     /**
      * Extract the GA4 client id from the _ga cookie value.
-     * "GA1.2.123456789.1620000000" -> "123456789.1620000000".
      *
      * @param mixed $ga
      */
@@ -743,7 +594,6 @@ class DFSS_Event_Builder
 
     /**
      * Extract the GA4 session id from the _ga_<container> cookie value.
-     * "GS1.1.1712345678.3.1.1712345699.0.0.0" -> "1712345678".
      *
      * @param mixed $gs
      *
@@ -754,9 +604,6 @@ class DFSS_Event_Builder
         if (!is_string($gs) || $gs === '') {
             return '';
         }
-        // _ga_<id> value is "GS1.1.<sessionId>.<n>..." (legacy, dot-separated)
-        // or "GS2.1.s<sessionId>$o<n>$..." (2024+ format, $-separated, s-prefixed).
-        // Capture the numeric sessionId in both; anything else degrades to ''.
         if (preg_match('/^GS\d\.\d+\.s?(\d+)/', $gs, $m)) {
             return $m[1];
         }

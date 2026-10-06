@@ -1,13 +1,6 @@
 <?php
 /**
- * DataFirefly Server-Side — the shop's own daily totals.
- *
- * Once a day the plugin tells the dispatcher what the shop ACTUALLY sold the
- * day before: how many orders, how much revenue, how much refunded. That is
- * the reference the delivered events get judged against — without it,
- * "we measured 87 purchases" is a number with nothing to compare it to.
- *
- * Totals only. No order id, no customer, no line item.
+ * DataFirefly Server-Side, the shop's own daily totals.
  *
  * @package DataFirefly_ServerSide
  */
@@ -22,15 +15,7 @@ class DFSS_Truth
     const LAST_SENT_OPTION = 'dfss_truth_last_date';
 
     /**
-     * Order statuses that count as a sale. Deliberately the paid ones only:
-     * a pending or cancelled order is not revenue, and counting it would make
-     * the shop look under-tracked when the tracking is in fact correct.
-     *
-     * `refunded` is a paid order too: the money came in, the purchase event
-     * was sent, and the refund is what the refund columns are for. Leaving it
-     * out made a fully refunded order vanish from BOTH sides of the day
-     * (neither a sale nor a refund), so the dispatcher saw one purchase event
-     * with no order behind it.
+     * Order statuses that count as a sale.
      *
      * @var string[]
      */
@@ -39,8 +24,8 @@ class DFSS_Truth
     public static function schedule_cron()
     {
         if (!wp_next_scheduled(self::CRON_HOOK)) {
-            // Just after the shop's own 00:30 — late enough that yesterday is
-            // definitely closed, early enough to be same-morning data.
+            // Just after the shop's own 00:30, late enough that yesterday is definitely closed, early
+            // enough to be same-morning data.
             wp_schedule_event(self::next_half_past_midnight(), 'daily', self::CRON_HOOK);
         }
     }
@@ -57,10 +42,6 @@ class DFSS_Truth
     /**
      * Send yesterday's totals unless they already went out.
      *
-     * WP-Cron only fires when the site gets traffic, so a quiet shop can skip a
-     * day. The stored date makes the job catch up rather than lose the day: it
-     * reports whatever day has not been reported yet, up to a week back.
-     *
      * @param array       $opts   Plugin options.
      * @param DFSS_Client $client Configured client.
      */
@@ -76,8 +57,7 @@ class DFSS_Truth
                 $result = $client->send_truth($totals);
                 if (empty($result['ok'])) {
                     if ((int) $result['code'] === 400) {
-                        // Our own bug, not a transient failure — recording the
-                        // day stops it retrying forever, and the log says why.
+                        // A 400 is our own bug, not a transient failure: record the day so it stops retrying.
                         update_option(self::LAST_SENT_OPTION, $day, false);
                         continue;
                     }
@@ -87,16 +67,14 @@ class DFSS_Truth
                 update_option(self::LAST_SENT_OPTION, $day, false);
             }
         } catch (Throwable $e) {
-            // A failed report costs nothing. Throwable, not Exception: a PHP
-            // Error raised here must not take the whole WP-Cron request down
-            // with it, which also silences every hook queued after this one.
+            // A failed report costs nothing.
             return;
         }
     }
 
     /**
-     * The days still owed, oldest first, capped at 7 so a plugin dormant for
-     * months does not wake up and replay a year.
+     * The days still owed, oldest first, capped at 7 so a plugin dormant for months does not wake up
+     * and replay a year.
      *
      * @param string $last Last reported day (YYYY-MM-DD), '' on first run.
      *
@@ -121,7 +99,9 @@ class DFSS_Truth
         return $days;
     }
 
-    /** Today in the SHOP's timezone, not the server's. */
+    /**
+     * Today in the SHOP's timezone, not the server's.
+     */
     public static function today()
     {
         $tz = wp_timezone();
@@ -144,18 +124,8 @@ class DFSS_Truth
         }
         $tz = wp_timezone_string();
 
-        // WooCommerce reads these dates in the site's timezone, which is
-        // exactly the day the shop means.
-        // `type` is NOT optional: without it wc_get_orders() also returns
-        // refund objects (WC_Order_Refund, which has no get_total_refunded()).
-        // The first refund of the shop then killed this job with a fatal, and
-        // since the cursor never advanced past that day, every night after it
-        // died on the same day: the dispatcher stopped hearing from the shop.
-        // `lang` => '' is NOT optional either: Polylang for WooCommerce joins
-        // every typed order query on the CURRENT language (the default one
-        // under WP-Cron), and the shop's orders in its other languages simply
-        // vanish from the count. Empty string is Polylang's "all languages".
-        // Harmless without Polylang: WooCommerce ignores the key.
+        // Dates are read in the site's timezone. 'type' excludes refund objects (they have no
+        // get_total_refunded()); 'lang' => '' counts every Polylang language, not just the default.
         $orders = wc_get_orders(array(
             'type' => 'shop_order',
             'lang' => '',
@@ -190,7 +160,9 @@ class DFSS_Truth
         );
     }
 
-    /** Next 00:30 in the shop's timezone, as a UTC timestamp. */
+    /**
+     * Next 00:30 in the shop's timezone, as a UTC timestamp.
+     */
     private static function next_half_past_midnight()
     {
         $tz = wp_timezone();

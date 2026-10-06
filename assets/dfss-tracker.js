@@ -1,33 +1,20 @@
 /**
- * DataFirefly Server-Side — client tracking layer.
+ * DataFirefly Server-Side: storefront tracker (core).
  *
- * One key, full funnel, dedup-perfect. For every event this script:
- *   1. Generates an event_id (UUID v4, or "order_<id>" for purchase — passed by
- *      PHP) ONCE, and uses it for BOTH sides.
- *   2. Fires the light client pixel (Meta fbq / GA4 gtag / TikTok ttq) — which
- *      the plugin injects itself using PUBLIC ids only — WITH that event_id, so
- *      the browser cookies (_fbp/_fbc/_ga/_ttp) get set and a fast client event
- *      is recorded.
- *   3. Beacons the SAME event_id + data to /wp-json/dfss/v1/collect, which signs
- *      and forwards it to the server-side CAPI.
- * Meta/GA/TikTok then deduplicate on (event_name, event_id): if an ad-blocker
- * kills step 2, only the server passes — always tracked, never doubled.
+ * For every event: one event id, a client tag fired with it, and a beacon carrying the same id
+ * to /wp-json/dfss/v1/collect, which signs and forwards it server-side. The platforms deduplicate
+ * on (event name, event id), so an ad blocker costs nothing and nothing counts twice.
  *
- * NOTHING fires until marketing consent is granted (when required) - except,
- * when the merchant turned on Google Consent Mode "advanced", the Google tags
- * themselves, cookieless until consent (see the DFSS-CONSENT-MODE block).
- * No secret or access token is ever present here — only the public
- * destination ids.
- *
- * No framework, no jQuery: this loads on the storefront and must stay tiny and
- * defensive (a tracking error must never break the page).
+ * Nothing fires before marketing consent when it is required, except the cookieless Google tags
+ * in Consent Mode advanced (DFSS-CONSENT-MODE block). Only public ids ever reach this file.
+ * Platform tags other than Google are modules (dfss-dest-*.js), loaded only when enabled.
  */
 (function () {
 	'use strict';
 
 	// Injected by PHP via wp_localize_script as window.DFSS_CFG.
 	var CFG = window.DFSS_CFG || {};
-	var PUBLIC = CFG.public || {}; // { meta:{pixelId}, ga4:{measurementId}, tiktok:{pixelCode}, pinterest:{adAccountId} }
+	var PUBLIC = CFG.public || {};
 	var CONSENT = CFG.consent || { required: true, cmp: '', hasWpConsentApi: false };
 	var EVENTS = CFG.events || {}; // server-provided context for this page (e.g. purchase)
 	var REST = CFG.restUrl || '';
@@ -35,16 +22,9 @@
 	var NONCE_URL = CFG.nonceUrl || '';
 	var COOKIE_DAYS = 90;
 
-	// Mode avance Google Consent Mode (option du marchand, eteinte par defaut).
-	// Toute la logique est dans le bloc partage DFSS_CM ; ici, la colle.
+	// Google Consent Mode advanced, a merchant option (off by default). Logic lives in DFSS_CM.
 	var CM_ON = false;
 
-	// The nonce baked into this page is only as fresh as the page itself. On a
-	// full-page cache it can be hours old, and lead / complete_registration /
-	// add_payment_info are refused on a stale one (2.22.0). So on the visitor's
-	// FIRST interaction (a bot that never touches the page never triggers it)
-	// we fetch a fresh nonce from a no-store endpoint; by the time a form is
-	// submitted it is in place. A failure keeps the baked-in nonce.
 	var nonceRefreshed = false;
 	function refreshNonce(done) {
 		if (!NONCE_URL || typeof window.fetch !== 'function') {
@@ -89,7 +69,7 @@
 	}
 	window.__dfssTrackerLoaded = true;
 
-	// ---- tiny utils ---------------------------------------------------------
+	// ---- tiny utils -----------------------------------------------------------
 
 	function uuidv4() {
 		// Prefer the crypto API; fall back to Math.random only if unavailable.
@@ -156,30 +136,10 @@
 		}
 	}
 
-	// ---- click id capture (first-party, 90 days) ----------------------------
+	// ---- click id capture (first-party, 90 days) ------------------------------
 
-	// Capture ad click ids from the URL into first-party cookies so the server
-	// can use them for matching long after the click. fbc has a Meta-prescribed
-	// format: fb.1.<ts>.<fbclid>.
-	// ---- ce que le navigateur doit encore faire pour Google Ads -------------
-	//
-	// Deux choses qu'un envoi serveur ne fera jamais, et qui sont parties avec
-	// GTM chez Drexco Medical le 8 septembre 2026 :
-	//
-	//   le REMARKETING DYNAMIQUE — une audience se construit avec le cookie du
-	//   visiteur. Aucun appel serveur ne peut la nourrir. Performance Max et
-	//   Shopping s'appuient dessus et s'assechent sans elle.
-	//
-	//   les conversions de type PAGE WEB — « Ajout Panier » enregistrait 44 a
-	//   67 signaux par jour. Le type d'une action est immuable apres creation :
-	//   un import ne peut pas l'alimenter, seul un tag la declenche.
-	//
-	// Ce ne sont pas des conversions dupliquees. Le remarketing n'en est pas
-	// une, et une action de type page web est une action DIFFERENTE de celle
-	// que le serveur alimente — Google ne dedoublonne qu'a action egale.
-
-	// ---- DFSS_TEST_EXPORT_GADS_START (pur, eprouve par tests/test-google-web-tags.mjs)
-	/** Les pages que Google reconnait, par evenement. */
+	// ---- DFSS_TEST_EXPORT_GADS_START (pure, tested by tests/test-google-web-tags.mjs)
+	/** Page types Google recognizes, per event. */
 	var GADS_PAGETYPE = {
 		view_item: 'product',
 		view_item_list: 'category',
@@ -189,12 +149,10 @@
 		purchase: 'purchase'
 	};
 
-	/** Une page de categorie peut en lister des centaines ; Google n'en lit pas tant. */
+	/** Google reads at most this many product ids per hit. */
 	var GADS_MAX_PRODIDS = 100;
 
-	/**
-	 * La charge utile du remarketing dynamique, ou null s'il n'y a pas de quoi.
-	 */
+	/** Dynamic remarketing payload, or null when there is nothing to send. */
 	function dfssRemarketingPayload(conversionId, name, data) {
 		if (!conversionId || typeof conversionId !== 'string') {
 			return null;
@@ -228,8 +186,7 @@
 	}
 
 	/**
-	 * La charge utile d'une conversion de type page web, ou null si cet
-	 * evenement n'a pas de libelle declare — le cas de presque tous.
+	 * Web-page conversion payload, or null when the event has no declared conversion label.
 	 */
 	function dfssWebConversionPayload(conversionId, labels, name, data) {
 		if (!conversionId || typeof conversionId !== 'string') {
@@ -247,9 +204,6 @@
 		if (typeof d.currency === 'string' && d.currency !== '') {
 			payload.currency = d.currency;
 		}
-		// Le meme identifiant de transaction des deux cotes : c'est ce qui
-		// permet a Google de dedoublonner si la meme action venait a etre
-		// alimentee deux fois.
 		if (typeof d.orderId === 'string' && d.orderId !== '') {
 			payload.transaction_id = d.orderId;
 		}
@@ -258,39 +212,21 @@
 	}
 	// ---- DFSS_TEST_EXPORT_GADS_END
 
-	// ---- retenue jusqu'au consentement --------------------------------------
-	//
-	// Trois etats, pas deux. Le tracker sait deja les distinguer — accorde,
-	// refuse, aucun signal lisible — puis ecrase le troisieme en refus. C'est
-	// prudent et ca jette la seule population recuperable : celui qui ignore la
-	// banniere, commande, puis accepte deux pages plus loin. Sa conversion
-	// n'existe jamais, alors qu'il a fini par dire oui.
-	//
-	// Un REFUS, lui, n'attend pas. Il ne se garde pas, il ne se repousse pas,
-	// et aucun reglage ne peut en decider autrement.
-	//
-	// Ce qui est retenu ne quitte pas l'appareil du visiteur : rien n'arrive
-	// chez le marchand ni chez nous tant qu'il n'a pas accepte. S'il refuse ou
-	// si le delai passe, ca disparait sans avoir servi.
-	//
-	// La duree n'a pas de defaut qui vaille : c'est une decision de conformite.
-	// Zero desactive la retenue, et c'est l'etat d'une boutique qui n'a rien
-	// decide — elle se comporte exactement comme avant.
+	// ---- hold until consent: a refusal is never held, only a missing answer --------
 
-	// ---- DFSS_TEST_EXPORT_HOLD_START (pure, eprouvee par tests/test-consent-hold.mjs)
+	// ---- DFSS_TEST_EXPORT_HOLD_START (pure, tested by tests/test-consent-hold.mjs)
 	/**
-	 * Que faire d'un evenement, sachant l'etat du consentement et l'age de
-	 * l'evenement : 'send', 'hold' ou 'discard'.
+	 * What to do with an event given consent state and age: 'send', 'hold' or 'discard'.
 	 *
-	 * @param {boolean|null} state   true accorde, false refuse, null pas de reponse
-	 * @param {number} ageMs         age de l'evenement
-	 * @param {number} holdMs        duree de retenue autorisee (0 = desactivee)
+	 * @param {boolean|null} state   true granted, false refused, null no answer
+	 * @param {number} ageMs         age of the event
+	 * @param {number} holdMs        allowed hold duration (0 = disabled)
 	 */
 	function dfssHoldDecision(state, ageMs, holdMs) {
 		if (state === true) {
 			return 'send';
 		}
-		// Un refus explicite s'arrete ici, avant toute question de duree.
+		// An explicit refusal stops here, whatever the duration.
 		if (state === false) {
 			return 'discard';
 		}
@@ -305,28 +241,12 @@
 	}
 	// ---- DFSS_TEST_EXPORT_HOLD_END
 
-	// ---- survie de l'identifiant de clic avant le consentement ---------------
-	//
-	// Le cookie reste derriere le consentement : il ne bouge pas d'un pouce.
-	// Mais l'identifiant, lui, n'a que la duree de la page d'atterrissage. Un
-	// visiteur qui arrive d'une annonce, navigue, puis accepte la banniere a
-	// deja perdu son gclid — il n'etait que dans l'URL de la premiere page.
-	//
-	// Drexco Medical, 13/09/2026 : 47 achats sur 55 partaient sans identifiant
-	// de clic. Google ne peut rien attribuer sans lui, quoi qu'on lui envoie.
-	// Leur GTM faisait ce travail (Conversion Linker, enableUrlPassthrough) ;
-	// en le retirant on a retire ca aussi, sans le remplacer.
-	//
-	// Propager l'identifiant dans les liens INTERNES n'est pas du stockage :
-	// c'est un parametre d'URL, deja present dans celle par laquelle Google a
-	// envoye le visiteur. Aucun consentement n'est requis pour ne rien ecrire.
-	// Vers un tiers, en revanche, ce serait une fuite — d'ou l'origine stricte.
+	// ---- click id passthrough before consent (URL only, nothing stored) -----------
 
-	// ---- DFSS_TEST_EXPORT_START (fonction pure, eprouvee par tests/test-url-passthrough.mjs)
+	// ---- DFSS_TEST_EXPORT_START (pure function, tested by tests/test-url-passthrough.mjs)
 	/**
-	 * Rend l'URL a suivre, identifiant de clic ajoute — ou null s'il ne faut
-	 * pas y toucher : lien externe, protocole non navigable, ancre, parametre
-	 * deja present, aucun identifiant a porter, ou href illisible.
+	 * The href with click ids appended, or null when the link must not be touched (external,
+	 * non-navigable, already tagged).
 	 */
 	function dfssDecorateUrl(href, ids, origin) {
 		if (!href || typeof href !== 'string') {
@@ -342,8 +262,6 @@
 		} catch (e) {
 			return null;
 		}
-		// Jamais vers un tiers : un identifiant de clic transmis ailleurs est
-		// une divulgation, pas une mesure.
 		if (url.origin !== origin) {
 			return null;
 		}
@@ -365,9 +283,7 @@
 	// ---- DFSS_TEST_EXPORT_END
 
 	/**
-	 * Les identifiants lus dans l'URL de la page courante. En memoire, jamais
-	 * ecrits : c'est ce qui permet de les porter de page en page sans rien
-	 * stocker tant que le visiteur n'a pas repondu a la banniere.
+	 * Click ids read from the current URL, kept in memory only: nothing is stored before consent.
 	 */
 	var pendingClickIds = { gclid: '', gbraid: '', wbraid: '' };
 
@@ -382,20 +298,9 @@
 	}
 
 	/**
-	 * Porter l'identifiant sur les liens internes, au moment du clic.
-	 *
-	 * Au clic plutot qu'au chargement : les themes reecrivent le DOM sans
-	 * arret (filtres, pagination, recherche instantanee), et un lien decore a
-	 * l'avance serait remplace avant d'etre suivi. Un seul ecouteur delegue
-	 * couvre aussi tout ce qui apparait plus tard.
-	 *
-	 * Ne touche a rien des que le cookie existe : le consentement a ete donne,
-	 * l'identifiant est en surete, la propagation n'a plus d'objet.
+	 * Carry click ids on internal links at click time; one delegated listener survives DOM rewrites.
 	 */
 	function wireClickIdPassthrough() {
-		// Le marchand peut la couper : c'est lui le responsable de traitement.
-		// Absent = active, pour que les boutiques deja installees ne perdent
-		// rien en montant de version.
 		if (CONSENT.clickIdPassthrough === false) {
 			return;
 		}
@@ -427,17 +332,12 @@
 			// Only (re)write _dfss_fbc if we have a fresh fbclid.
 			setCookie('_dfss_fbc', 'fb.1.' + Date.now() + '.' + fbclid, COOKIE_DAYS);
 		}
-		// getParam d'abord, la memoire ensuite : si le visiteur accepte sur une
-		// page ou le parametre a ete retire (un theme qui reecrit l'URL, un
-		// history.replaceState), l'identifiant porte depuis l'atterrissage est
-		// encore la.
 		var gclid = getParam('gclid') || pendingClickIds.gclid;
 		if (gclid) {
 			setCookie('_dfss_gclid', gclid, COOKIE_DAYS);
 		}
-		// Google issues gbraid or wbraid INSTEAD of gclid when the journey
-		// crosses an app boundary or cookies are restricted. Same landing, same
-		// cookie lifetime: whichever one arrives is the one that attributes.
+		// Google issues gbraid or wbraid INSTEAD of gclid when the journey crosses an app boundary or
+		// cookies are restricted.
 		var gbraid = getParam('gbraid') || pendingClickIds.gbraid;
 		if (gbraid) {
 			setCookie('_dfss_gbraid', gbraid, COOKIE_DAYS);
@@ -454,17 +354,14 @@
 		if (ttclid) {
 			setCookie('_dfss_ttclid', ttclid, COOKIE_DAYS);
 		}
-		// ChatGPT Ads attribution id. The OAIQ pixel stores it itself in
-		// __oppref (720h); our copy covers shops that run without the pixel.
+		// ChatGPT Ads attribution id.
 		var oppref = getParam('oppref');
 		if (oppref) {
 			setCookie('_dfss_oppref', oppref, COOKIE_DAYS);
 		}
 	}
 
-	// Read the browser identifiers we have available client-side. These are also
-	// captured server-side at checkout, but sending them on every beacon keeps
-	// match quality high for top-of-funnel events.
+	// Read the browser identifiers we have available client-side.
 	function collectUserData() {
 		var u = {};
 		var fbp = getCookie('_fbp');
@@ -497,18 +394,11 @@
 				u.clientId = parts[parts.length - 2] + '.' + parts[parts.length - 1];
 			}
 		}
-		// GA4 session id — from the _ga_<container> cookie ("GS1.1.<sessionId>.<n>...").
-		// Sending it lets the server-side event join the SAME session gtag opened,
-		// so GA4 attributes it to that session's real source/medium instead of
-		// opening a sourceless session that reports as "Unassigned".
+		// GA4 session id, from the _ga_<container> cookie ("GS1.1.<sessionId>.<n>...").
 		var mid = PUBLIC.ga4 && PUBLIC.ga4.measurementId;
 		if (mid) {
 			var gs = getCookie('_ga_' + String(mid).replace(/^G-/, ''));
 			if (gs) {
-				// _ga_<id> = "GS1.1.<sessionId>.<n>..." (legacy, dot-separated) OR
-				// "GS2.1.s<sessionId>$o<n>$..." (2024+ format, $-separated, s-prefixed).
-				// The capture group takes the numeric sessionId in both; a non-match
-				// leaves sessionId unset (graceful) rather than shipping garbage.
 				var m = gs.match(/^GS\d\.\d+\.s?(\d+)/);
 				if (m) { u.sessionId = m[1]; }
 			}
@@ -1291,10 +1181,7 @@
 	// Resolve current marketing-consent state across the supported stacks.
 	// Returns true/false; when required and indeterminate, returns false (deny).
 	/**
-	 * L'etat brut du consentement : true accorde, false refuse, null pas de
-	 * reponse lisible. `hasMarketingConsent()` ecrase le troisieme en refus,
-	 * ce qui est le bon defaut pour envoyer ; la retenue, elle, a besoin de la
-	 * difference — on ne garde jamais rien d'un visiteur qui a dit non.
+	 * Raw marketing consent state: true granted, false refused, null no readable answer.
 	 */
 	function marketingConsentState() {
 		if (!CONSENT.required) {
@@ -1312,17 +1199,14 @@
 			return true;
 		}
 
-		// 0. DataFirefly Cookie Consent (our own banner) — authoritative when
-		// present. Exposes window.dfcc.hasConsent('marketing') from its cookie.
+		// DataFirefly Cookie Consent first: authoritative when present.
 		if (window.dfcc && typeof window.dfcc.hasConsent === 'function') {
 			try {
 				return !!window.dfcc.hasConsent('marketing');
 			} catch (e) {}
 		}
 
-		// 1. The WordPress-native path, kept AHEAD of the shared detection: on a
-		// WordPress site the official Consent API is the agreed answer, and a
-		// plugin that implements it has said so deliberately.
+		// Then the WordPress Consent API and Complianz, ahead of the shared detection.
 		if (typeof window.wp_has_consent === 'function') {
 			try {
 				return !!window.wp_has_consent('marketing');
@@ -1334,10 +1218,7 @@
 			} catch (e) {}
 		}
 
-		// 2. Every other consent tool, through the detection shared byte-for-byte
-		// with the PrestaShop and Shopware trackers. Cookiebot and IAB TCF used to
-		// live here in full and only here, which is how a Cookiebot shop on
-		// PrestaShop got no tracking at all.
+		// Then every other CMP, through the detection shared with PrestaShop and Shopware.
 		var shared = DFSS_CMP.granted(CONSENT);
 		if (shared !== null) {
 			return shared;
@@ -1348,10 +1229,7 @@
 	}
 
 	/**
-	 * Le verdict publicite, a trois etats, pour Google Consent Mode : celui de
-	 * marketingConsentState(), complete par les chemins WordPress (WP Consent
-	 * API, Complianz) que seul hasMarketingConsent() lit. Leur refus reste
-	 * null : le refus par defaut deja pose suffit.
+	 * Three-state ads verdict for Google Consent Mode, including the WordPress-only signals.
 	 */
 	function adsConsentState() {
 		var s = marketingConsentState();
@@ -1362,7 +1240,7 @@
 		return s;
 	}
 
-	/** Le verdict mesure d'audience, pour analytics_storage uniquement. */
+	/** Three-state analytics verdict, used for analytics_storage only. */
 	function analyticsConsentState() {
 		if (!CONSENT.required) {
 			return true;
@@ -1404,8 +1282,7 @@
 		};
 	}
 
-	// Run `fn` once consent is granted. If already granted, run now. Otherwise
-	// listen for the common "consent changed" signals and re-check.
+	// Run `fn` once consent is granted.
 	var consentListenersBound = false;
 	var pendingOnConsent = [];
 
@@ -1423,7 +1300,6 @@
 	}
 
 	function flushPending() {
-		// Un refus efface la file avant toute chose : il ne se garde pas.
 		if (marketingConsentState() === false) {
 			heldClear();
 
@@ -1445,61 +1321,27 @@
 			return;
 		}
 		consentListenersBound = true;
-		// One list, shared with the other two trackers: a CMP whose "the visitor
-		// changed their mind" event is missing here does not fail loudly, it just
-		// leaves the queue unflushed until the next page.
 		DFSS_CMP.bind(flushPending, CONSENT);
 	}
 
-	// ---- client tag injection (PUBLIC ids only) -----------------------------
+	// ---- browser tags (public ids only) ------------------------------------------
 
-	var injected = { meta: false, ga4: false, tiktok: false, oaiq: false };
+	// Google tags live here because the shared Consent Mode block calls them. Every other platform
+	// is a module (dfss-dest-*.js) registered in window.DFSS_DEST, enqueued only when enabled.
+	var injected = { ga4: false, gads: false };
+	var HELPERS = { loadScript: loadScript };
 
-	function injectMeta() {
-		if (injected.meta || !PUBLIC.meta || !PUBLIC.meta.pixelId) {
-			return injected.meta;
-		}
-		// AUGMENT, NOT REPLACE: if the merchant already has a Meta pixel on the
-		// page (another plugin / GTM), `window.fbq` already exists. We must NOT
-		// add a second `init` for our id — that would double-count. Instead we
-		// reuse the existing fbq and just fire our events WITH the shared eventID
-		// (Meta dedups on eventID for the SAME pixel id). Operators must point
-		// their existing pixel at the same id as their DataFirefly tenant.
-		var preExisting = (typeof window.fbq === 'function');
-
-		// Standard Meta Pixel bootstrap (no PII, just the public Pixel ID).
-		!(function (f, b, e, v, n, t, s) {
-			if (f.fbq) return;
-			n = f.fbq = function () {
-				n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments);
-			};
-			if (!f._fbq) f._fbq = n;
-			n.push = n;
-			n.loaded = true;
-			n.version = '2.0';
-			n.queue = [];
-			t = b.createElement(e);
-			t.async = true;
-			t.src = v;
-			s = b.getElementsByTagName(e)[0];
-			if (s && s.parentNode) {
-				s.parentNode.insertBefore(t, s);
-			} else {
-				(b.head || b.documentElement).appendChild(t);
+	function eachDest(fn) {
+		var reg = window.DFSS_DEST || {};
+		for (var key in reg) {
+			if (Object.prototype.hasOwnProperty.call(reg, key) && PUBLIC[key] && reg[key]) {
+				try { fn(reg[key], PUBLIC[key]); } catch (e) {}
 			}
-		})(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
-
-		// Only initialize our pixel when none was already present, to avoid a
-		// duplicate init. When pre-existing, we trust the merchant's init.
-		if (!preExisting) {
-			try {
-				window.fbq('init', String(PUBLIC.meta.pixelId));
-			} catch (e) {}
 		}
-		injected.meta = true;
-		return true;
 	}
 
+	// The gtag tag is only here for the _ga cookie, which lets the server event join the session.
+	// It sends nothing itself: GA4 does not deduplicate gtag against Measurement Protocol.
 	function injectGa4() {
 		if (injected.ga4 || !PUBLIC.ga4 || !PUBLIC.ga4.measurementId) {
 			return injected.ga4;
@@ -1509,70 +1351,12 @@
 		window.dataLayer = window.dataLayer || [];
 		window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
 		window.gtag('js', new Date());
-		// We send events explicitly with our own transaction_id for dedup, so we
-		// disable automatic page_view here to avoid an unattributed duplicate.
 		window.gtag('config', id, { send_page_view: false });
 		injected.ga4 = true;
 		return true;
 	}
 
-	function injectTikTok() {
-		if (injected.tiktok || !PUBLIC.tiktok || !PUBLIC.tiktok.pixelCode) {
-			return injected.tiktok;
-		}
-		// Standard TikTok Pixel bootstrap (public Pixel Code only).
-		!(function (w, d, t) {
-			w.TiktokAnalyticsObject = t;
-			var ttq = (w[t] = w[t] || []);
-			ttq.methods = ['page', 'track', 'identify', 'instances', 'debug', 'on', 'off', 'once', 'ready', 'alias', 'group', 'enableCookie', 'disableCookie'];
-			ttq.setAndDefer = function (obj, method) {
-				obj[method] = function () {
-					obj.push([method].concat(Array.prototype.slice.call(arguments, 0)));
-				};
-			};
-			for (var i = 0; i < ttq.methods.length; i++) {
-				ttq.setAndDefer(ttq, ttq.methods[i]);
-			}
-			ttq.instance = function (id) {
-				var inst = ttq._i[id] || [];
-				for (var j = 0; j < ttq.methods.length; j++) {
-					ttq.setAndDefer(inst, ttq.methods[j]);
-				}
-				return inst;
-			};
-			ttq.load = function (id, opts) {
-				var url = 'https://analytics.tiktok.com/i18n/pixel/events.js';
-				ttq._i = ttq._i || {};
-				ttq._i[id] = [];
-				ttq._i[id]._u = url;
-				ttq._t = ttq._t || {};
-				ttq._t[id] = +new Date();
-				ttq._o = ttq._o || {};
-				ttq._o[id] = opts || {};
-				var script = d.createElement('script');
-				script.type = 'text/javascript';
-				script.async = true;
-				script.src = url + '?sdkid=' + id + '&lib=' + t;
-				var first = d.getElementsByTagName('script')[0];
-				if (first && first.parentNode) {
-					first.parentNode.insertBefore(script, first);
-				} else {
-					(d.head || d.documentElement).appendChild(script);
-				}
-			};
-			ttq.load(String(PUBLIC.tiktok.pixelCode));
-			ttq.page();
-		})(window, document, 'ttq');
-		injected.tiktok = true;
-		return true;
-	}
-
-	/**
-	 * Le tag Google Ads. Il ne sert qu'aux deux choses que le serveur ne peut
-	 * pas faire — remarketing et conversions de type page web. Aucune
-	 * conversion d'achat ne part d'ici : celle-la est envoyee par le serveur,
-	 * depuis le hook de commande.
-	 */
+	/** Google Ads tag, only for dynamic remarketing and web-page conversions (purchases go server-side). */
 	function injectGoogleAds() {
 		var cfg = PUBLIC.google;
 		if (injected.gads || !cfg || !cfg.conversionId) {
@@ -1585,82 +1369,15 @@
 		window.gtag('js', new Date());
 		window.gtag('config', id);
 		injected.gads = true;
-
-		return true;
-	}
-
-	function injectOaiq() {
-		if (injected.oaiq || !PUBLIC.openai || !PUBLIC.openai.pixelId) {
-			return injected.oaiq;
-		}
-		// AUGMENT, NOT REPLACE: if the OAIQ SDK (or its queue stub) is already
-		// on the page, reuse it and skip our own init — a second init for the
-		// same pixel would double-count. Official queue stub otherwise.
-		var preExisting = (typeof window.oaiq === 'function');
-		if (!preExisting) {
-			var q = function () { q.q.push(arguments); };
-			q.q = [];
-			window.oaiq = q;
-			loadScript('https://bzrcdn.openai.com/sdk/oaiq.min.js');
-		}
-		// The OAIQ pixel defaults to consent=true; injectAll() only ever runs
-		// AFTER our own marketing-consent gate, so init here is compliant.
-		if (!preExisting) {
-			try {
-				window.oaiq('init', { pixelId: String(PUBLIC.openai.pixelId) });
-			} catch (e) {}
-		}
-		injected.oaiq = true;
 		return true;
 	}
 
 	function injectAll() {
-		injectMeta();
+		eachDest(function (dest, cfg) { dest.inject(cfg, HELPERS); });
 		injectGa4();
-		injectTikTok();
 		injectGoogleAds();
-		injectOaiq();
-		// Pinterest is intentionally not injected client-side in v2.0 (the
-		// dispatcher handles Pinterest server-side; no light client tag needed).
 	}
 
-	// ---- per-destination client fire (WITH the shared event_id) -------------
-
-	// Map our canonical event name -> the destination's event name.
-	var META_MAP = {
-		page_view: 'PageView',
-		view_content: 'ViewContent',
-		add_to_cart: 'AddToCart',
-		initiate_checkout: 'InitiateCheckout',
-		add_payment_info: 'AddPaymentInfo',
-		purchase: 'Purchase',
-		lead: 'Lead',
-		complete_registration: 'CompleteRegistration',
-		search: 'Search',
-		subscribe: 'Subscribe',
-		schedule: 'Schedule',
-		contact: 'Contact',
-		start_trial: 'StartTrial',
-		submit_application: 'SubmitApplication',
-		donate: 'Donate',
-		find_location: 'FindLocation',
-		customize_product: 'CustomizeProduct',
-		add_to_wishlist: 'AddToWishlist'
-	};
-	var TT_MAP = {
-		page_view: 'Pageview',
-		view_content: 'ViewContent',
-		add_to_cart: 'AddToCart',
-		initiate_checkout: 'InitiateCheckout',
-		add_payment_info: 'AddPaymentInfo',
-		purchase: 'CompletePayment',
-		lead: 'SubmitForm',
-		complete_registration: 'CompleteRegistration',
-		search: 'Search',
-		subscribe: 'Subscribe',
-		add_to_wishlist: 'AddToWishlist',
-		contact: 'Contact'
-	};
 	var GA4_MAP = {
 		page_view: 'page_view',
 		view_content: 'view_item',
@@ -1689,126 +1406,7 @@
 		login: 'login'
 	};
 
-	function fireMeta(name, eventId, data) {
-		if (!injected.meta || typeof window.fbq !== 'function') {
-			return;
-		}
-		var metaName = META_MAP[name];
-		if (!metaName) {
-			return;
-		}
-		var props = {};
-		if (data) {
-			if (typeof data.value === 'number') { props.value = data.value; }
-			if (data.currency) { props.currency = data.currency; }
-			if (data.contentIds && data.contentIds.length) {
-				props.content_ids = data.contentIds;
-				props.content_type = 'product';
-			}
-			if (typeof data.numItems === 'number') { props.num_items = data.numItems; }
-		}
-		try {
-			window.fbq('track', metaName, props, { eventID: eventId });
-		} catch (e) {}
-	}
-
-	function fireGa4(name, eventId, data) {
-		if (!injected.ga4 || typeof window.gtag !== 'function') {
-			return;
-		}
-		// Client-side GA4 fires NOTHING. Not even purchase.
-		//
-		// This used to fire purchase, on the belief that "GA4 deduplicates on
-		// transaction_id". Production disproved it: on datafirefly.com,
-		// transaction 13945 came back from the GA4 Data API as
-		// ecommercePurchases = 2 with revenue 298, exactly twice the 149 we
-		// sent. The transaction_id WAS present and identical on both paths —
-		// GA4 simply does not deduplicate a gtag event against a Measurement
-		// Protocol one. Every sale was counted twice, and the merchant's
-		// reported revenue with it.
-		//
-		// The server-side event is the single source for GA4. The gtag tag is
-		// still injected (injectGa4) because the _ga cookie it sets is what
-		// lets the server-side event join the same session — that is the only
-		// reason the tag is there.
-		return;
-	}
-
-	function fireTikTok(name, eventId, data) {
-		if (!injected.tiktok || !window.ttq || typeof window.ttq.track !== 'function') {
-			return;
-		}
-		var ttName = TT_MAP[name];
-		if (!ttName) {
-			return;
-		}
-		var props = {};
-		if (data) {
-			if (typeof data.value === 'number') { props.value = data.value; }
-			if (data.currency) { props.currency = data.currency; }
-			if (data.contents && data.contents.length) { props.contents = data.contents; }
-		}
-		try {
-			window.ttq.track(ttName, props, { event_id: eventId });
-		} catch (e) {}
-	}
-
-	var OAIQ_MAP = {
-		page_view: 'page_viewed',
-		view_content: 'contents_viewed',
-		add_to_cart: 'items_added',
-		initiate_checkout: 'checkout_started',
-		purchase: 'order_created',
-		lead: 'lead_created',
-		complete_registration: 'registration_completed'
-	};
-
-	// OAIQ wants amounts as integers in MINOR currency units (4200 = 42.00).
-	// Currencies without a minor unit must not be multiplied (mirror of the
-	// dispatcher's toMinorUnits).
-	var OAIQ_ZERO_DECIMAL = { BIF: 1, CLP: 1, DJF: 1, GNF: 1, JPY: 1, KMF: 1, KRW: 1, PYG: 1, RWF: 1, UGX: 1, VND: 1, VUV: 1, XAF: 1, XOF: 1, XPF: 1 };
-	function oaiqAmount(value, currency) {
-		var factor = OAIQ_ZERO_DECIMAL[String(currency || '').toUpperCase()] ? 1 : 100;
-		return Math.round(value * factor);
-	}
-
-	function fireOaiq(name, eventId, data) {
-		if (!injected.oaiq || typeof window.oaiq !== 'function') {
-			return;
-		}
-		var oaiqName = OAIQ_MAP[name];
-		if (!oaiqName) {
-			return;
-		}
-		// Unlike GA4 (which proved it does NOT dedup gtag vs Measurement
-		// Protocol), OpenAI documents deduplication explicitly: pixel id +
-		// event name + event_id, first event wins. Server CAPI + this pixel
-		// share our eventId, so firing both is the intended setup.
-		var props = { type: 'customer_action' };
-		if (data) {
-			if (data.contentIds && data.contentIds.length) {
-				props.type = 'contents';
-				props.contents = data.contentIds.slice(0, 3).map(function (id) {
-					return { id: String(id) };
-				});
-			}
-			if (typeof data.value === 'number' && data.currency) {
-				props.amount = oaiqAmount(data.value, data.currency);
-				props.currency = String(data.currency).toUpperCase();
-			}
-		}
-		try {
-			window.oaiq('measure', oaiqName, props, { event_id: eventId });
-		} catch (e) {}
-	}
-
-	/**
-	 * Le remarketing dynamique et les conversions de type page web — les seules
-	 * choses que ce traqueur envoie encore a Google depuis le navigateur, et
-	 * pour une raison chacune : une audience se construit avec le cookie du
-	 * visiteur, et une action de conversion de type page web ne peut pas
-	 * recevoir d'import. Tout le reste passe par le serveur.
-	 */
+	/** Google Ads remarketing and web-page conversions, the only Google hits sent from the browser. */
 	function fireGoogleAds(name, clientData) {
 		var cfg = PUBLIC.google;
 		if (!cfg || !cfg.conversionId || !injectGoogleAds() || typeof window.gtag !== 'function') {
@@ -1828,25 +1426,21 @@
 		} catch (e) {}
 	}
 
+	// Every client tag fires with the shared event id, so the platform deduplicates with the server.
 	function fireClient(name, eventId, clientData, googleDone) {
-		fireMeta(name, eventId, clientData);
-		fireGa4(name, eventId, clientData);
-		fireTikTok(name, eventId, clientData);
-		fireOaiq(name, eventId, clientData);
-		// En mode avance, Google est deja parti au moment de track().
+		eachDest(function (dest) { dest.fire(name, eventId, clientData); });
+		// In Consent Mode advanced, Google already fired from track().
 		if (!googleDone) {
 			fireGoogleAds(name, clientData);
 		}
 	}
 
-	// ---- beacon to our server -----------------------------------------------
-
-	// ---- la file retenue, chez le visiteur ----------------------------------
+	// ---- consent hold (kept in the visitor's own browser) ---------------------
 
 	var HOLD_KEY = '_dfss_held';
 	var HOLD_MAX = 20;
 
-	/** Duree de retenue, en millisecondes. 0 = desactivee (defaut). */
+	/** Hold duration in milliseconds; 0 disables it (default). */
 	function holdMs() {
 		var m = CONSENT.holdMinutes;
 
@@ -1895,10 +1489,71 @@
 		}
 	}
 
-	function beacon(name, eventId, beaconData, sentByBrowser) {
-		if (!REST) {
+	// ---- beacon to our server ---------------------------------------------------
+
+	// Only what the endpoint accepts is beaconed: anything else would boot WordPress for a refusal.
+	// The client tags still fire for every event. Old cached configs without the list send all.
+	var BEACON_EVENTS = CFG.beaconEvents || null;
+	var NONCE_EVENTS = CFG.nonceEvents || ['lead', 'complete_registration', 'add_payment_info'];
+	// Events that may leave the page: sent on sendBeacon, which survives unload.
+	var NAVIGATING = ['purchase', 'select_item', 'select_promotion', 'lead', 'complete_registration',
+		'contact', 'schedule', 'share', 'start_trial', 'subscribe', 'submit_application', 'donate',
+		'find_location', 'add_shipping_info', 'add_to_wishlist'];
+	var BATCH_MAX = 10;
+	var BATCH_DELAY = 30;
+	var batch = [];
+	var batchTimer = null;
+	var beaconed = {};
+
+	function canBeacon(name) {
+		return !!REST && (!BEACON_EVENTS || BEACON_EVENTS.indexOf(name) !== -1);
+	}
+
+	function sendBeaconNow(payload) {
+		if (!navigator.sendBeacon) {
+			return false;
+		}
+		try {
+			var url = REST + (REST.indexOf('?') === -1 ? '?' : '&') + '_wpnonce=' + encodeURIComponent(NONCE);
+			return navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
+		} catch (e) {
+			return false;
+		}
+	}
+
+	// Page-load events go out together: one request, one WordPress boot, instead of one per event.
+	function flushBatch() {
+		if (batchTimer) {
+			clearTimeout(batchTimer);
+			batchTimer = null;
+		}
+		if (!batch.length) {
 			return;
 		}
+		var items = batch.splice(0, batch.length);
+		var payload = JSON.stringify(items.length === 1 ? items[0] : { events: items });
+		if (document.visibilityState === 'hidden' && sendBeaconNow(payload)) {
+			return;
+		}
+		sendWithFetch(payload, false);
+	}
+
+	try {
+		window.addEventListener('pagehide', flushBatch);
+		document.addEventListener('visibilitychange', function () {
+			if (document.visibilityState === 'hidden') {
+				flushBatch();
+			}
+		});
+	} catch (e) {}
+
+	function beacon(name, eventId, beaconData, sentByBrowser) {
+		// The same event can reach here from the consent queue and the hold queue.
+		if (!canBeacon(name) || beaconed[eventId]) {
+			return;
+		}
+		beaconed[eventId] = true;
+
 		var body = {
 			event_name: name,
 			event_id: eventId,
@@ -1906,55 +1561,39 @@
 			user_data: collectUserData(),
 			event_data: beaconData || {}
 		};
-		// Referring URL — lets GA4 derive source/medium when no client-side
-		// session exists (ad-blocked gtag). Only forward a real external http(s)
-		// referrer; empty/internal referrers add nothing.
+		// External referrer: lets GA4 derive source/medium when gtag is blocked.
 		var ref = document.referrer;
 		if (ref && /^https?:\/\//i.test(ref)) {
 			body.page_referrer = ref;
 		}
-		// Mode avance : la balise GA4 a deja envoye cet evenement. Le dispatcher
-		// ne doit pas le renvoyer (GA4 ne dedoublonne pas gtag contre MP).
+		// Consent Mode advanced: the GA4 tag already sent it, the dispatcher must not resend it.
 		if (sentByBrowser && sentByBrowser.length) {
 			body.browser_sent = sentByBrowser.slice();
 		}
-		var payload = JSON.stringify(body);
 
-		// sendBeacon survives page unload (key for purchase on the thank-you
-		// page and for add_to_cart that triggers navigation). It cannot set the
-		// nonce header, so we pass the nonce in the URL for that path; fetch
-		// (with the header) is preferred when the page is staying.
-		// Events triggered by a click/submit that may navigate away — flush via
-		// sendBeacon so they survive the unload.
-		// Events that fire as the page is LEAVING. A plain fetch is cancelled
-		// with the document, so these have to go out on sendBeacon or they are
-		// simply lost — which is how a mailto click, a share and a booking link
-		// can all look like nothing ever happened.
-		var navigating = (name === 'purchase' || name === 'select_item' ||
-			name === 'select_promotion' || name === 'lead' ||
-			name === 'complete_registration' || name === 'contact' ||
-			name === 'schedule' || name === 'share' || name === 'start_trial' ||
-			name === 'subscribe' || name === 'submit_application' ||
-			name === 'donate' || name === 'find_location' ||
-			name === 'add_shipping_info' || name === 'add_to_wishlist');
-		var usedBeacon = false;
-		if (navigator.sendBeacon && (navigating || document.visibilityState === 'hidden')) {
-			try {
-				var url = REST + (REST.indexOf('?') === -1 ? '?' : '&') + '_wpnonce=' + encodeURIComponent(NONCE);
-				var blob = new Blob([payload], { type: 'application/json' });
-				usedBeacon = navigator.sendBeacon(url, blob);
-			} catch (e) {}
-		}
-		if (usedBeacon) {
+		var navigating = NAVIGATING.indexOf(name) !== -1;
+		if (navigating || document.visibilityState === 'hidden') {
+			flushBatch();
+			if (sendBeaconNow(JSON.stringify(body))) {
+				return;
+			}
+			sendWithFetch(JSON.stringify(body), false);
 			return;
 		}
-
-		// Default path: fetch with the nonce header. A "nonce" refusal on a
-		// cached page is retried ONCE with a fresh nonce; sendBeacon above cannot
-		// read its answer, which is why the refresh is also armed at load.
-		sendWithFetch(payload, false);
+		// Nonce-gated events go alone, so a stale-nonce retry never resends a whole batch.
+		if (NONCE_EVENTS.indexOf(name) !== -1) {
+			sendWithFetch(JSON.stringify(body), false);
+			return;
+		}
+		batch.push(body);
+		if (batch.length >= BATCH_MAX) {
+			flushBatch();
+		} else if (!batchTimer) {
+			batchTimer = setTimeout(flushBatch, BATCH_DELAY);
+		}
 	}
 
+	// fetch with the nonce header. A "nonce" refusal on a cached page is retried once with a fresh one.
 	function sendWithFetch(payload, retried) {
 		try {
 			fetch(REST, {
@@ -1977,45 +1616,38 @@
 		} catch (e) {}
 	}
 
-	// ---- the public track() : one id, both sides ----------------------------
+	// ---- track(): one event id, shared by the client tag and the server event ------
 
-	// `opts.eventId` lets PHP pin the id (purchase => "order_<id>"); otherwise a
-	// fresh UUID is minted and shared between the client fire and the beacon.
-	// `opts.clientData` shapes the client pixel; `opts.beaconData` the server event.
+	// opts.eventId pins the id (purchase: "order_<id>"); opts.clientData shapes the client tags,
+	// opts.beaconData the server event; opts.clientOnly skips the beacon (purchase is sent by the
+	// order hook, which cannot be spoofed).
 	function track(name, opts) {
 		opts = opts || {};
-		// Un seul identifiant, pour la balise, la retenue et l'envoi.
 		var eventId = opts.eventId || uuidv4();
 		var clientData = opts.clientData || opts.beaconData || {};
 
-		// Mode avance : Google part MAINTENANT, dans l'etat de consentement du
-		// moment (ping sans cookies tant que le visiteur n'a pas accepte).
+		// Consent Mode advanced: Google fires now, in the current consent state (cookieless until
+		// the visitor accepts).
 		var sentByBrowser = CM_ON ? DFSS_CM.fire(cmEnv(), name, eventId, clientData, opts.consentVerdict) : [];
 
-		// Pas encore de reponse a la banniere : on retient l'evenement CHEZ LE
-		// VISITEUR plutot que de le perdre. Rien ne part. S'il accepte,
-		// heldFlush l'envoie ; s'il refuse ou si le delai passe, il disparait.
-		if (!opts.clientOnly && dfssHoldDecision(marketingConsentState(), 0, holdMs()) === 'hold') {
+		// No answer to the banner yet: hold the event in the visitor's browser instead of losing it.
+		if (!opts.clientOnly && canBeacon(name) && dfssHoldDecision(marketingConsentState(), 0, holdMs()) === 'hold') {
 			heldPush(name, eventId, opts.beaconData || {}, sentByBrowser);
 		}
 
 		whenConsent(function () {
-			injectAll(); // safe to call repeatedly; injects once
+			injectAll(); // injects once
 			fireClient(name, eventId, clientData, CM_ON);
-			// `clientOnly` fires the browser pixel but skips the server beacon.
-			// Used for purchase: the server side is delivered by the authoritative
-			// WooCommerce order hook (not the spoofable public beacon), keyed on the
-			// same "order_<id>" so the two sides still deduplicate exactly.
 			if (!opts.clientOnly) {
 				beacon(name, eventId, opts.beaconData || {}, sentByBrowser);
 			}
 		});
 	}
 
-	// Expose for theme/3rd-party use and for our own WooCommerce hooks below.
+	// Public API, used by themes and by the optional modules (dfss-engagement.js).
 	window.dfssTrack = track;
 
-	// ---- full-funnel auto-wiring -------------------------------------------
+	// ---- full-funnel auto-wiring ----------------------------------------------
 
 	function num(v) {
 		var n = parseFloat(v);
@@ -2027,10 +1659,7 @@
 		track('page_view', {});
 	}
 
-	// view_content on an ordinary content page — article, service page, case
-	// study. Context provided by PHP in EVENTS.content, which is built even when
-	// WooCommerce is absent: an institutional site has content and leads, not a
-	// cart, and it used to report neither.
+	// view_content on a content page (article, service page...).
 	function trackContentView() {
 		var c = EVENTS.content;
 		if (!c || !c.id) {
@@ -2047,7 +1676,7 @@
 		});
 	}
 
-	// view_item on a product page — context provided by PHP in EVENTS.viewItem.
+	// view_item on a product page, context provided by PHP in EVENTS.viewItem.
 	function trackViewItem() {
 		var v = EVENTS.viewItem;
 		if (!v) {
@@ -2069,7 +1698,7 @@
 		});
 	}
 
-	// initiate_checkout on the checkout page — context in EVENTS.checkout.
+	// initiate_checkout on the checkout page, context in EVENTS.checkout.
 	function trackInitiateCheckout() {
 		var c = EVENTS.checkout;
 		if (!c) {
@@ -2096,8 +1725,8 @@
 		});
 	}
 
-	// add_payment_info — fired once the customer interacts with a payment method
-	// on the checkout page (best-effort, classic checkout).
+	// add_payment_info, fired once the customer interacts with a payment method on the checkout page
+	// (best-effort, classic checkout).
 	var paymentInfoSent = false;
 	function wireAddPaymentInfo() {
 		var c = EVENTS.checkout;
@@ -2109,13 +1738,6 @@
 				return;
 			}
 			paymentInfoSent = true;
-			// Les MEMES lignes produit que initiate_checkout, lues dans le meme
-			// contexte. Elles manquaient : l'etape ne portait que la valeur et
-			// la devise, donc GA4 affichait un add_payment_info sans articles
-			// et Meta recevait un AddPaymentInfo sans contents — moins de
-			// matiere pour le rapprochement, et une etape du tunnel qu'on ne
-			// pouvait pas ventiler par produit alors que celle d'avant et
-			// celle d'apres le pouvaient.
 			var apiProducts = (c.products || []).map(function (p) {
 				return { id: String(p.id), name: p.name, price: num(p.price), quantity: num(p.quantity) };
 			});
@@ -2142,13 +1764,6 @@
 				onPay();
 			}
 		});
-		// A shop with ONE payment method never fires the change above: the
-		// radio is pre-selected (often hidden), so the shopper has nothing to
-		// change and the step was missing from every such funnel. Placing the
-		// order is the other moment the customer has provided payment
-		// information, and it is the one GA4 documents for this event.
-		// Submit AND click, because a themed button can place the order
-		// without submitting the form.
 		document.addEventListener('submit', function (e) {
 			var f = e.target;
 			if (f && f.matches && f.matches('form.checkout, form.woocommerce-checkout')) {
@@ -2165,9 +1780,6 @@
 		}, true);
 	}
 
-	// purchase on the thank-you page — fully provided by PHP in EVENTS.purchase,
-	// including the authoritative event_id ("order_<id>") so it matches the
-	// server-side purchase event exactly.
 	function trackPurchase() {
 		var p = EVENTS.purchase;
 		if (!p || !p.eventId) {
@@ -2178,7 +1790,7 @@
 		});
 		track('purchase', {
 			eventId: p.eventId, // "order_<id>" — pinned by PHP
-			clientOnly: true,   // server side is delivered by the authoritative order hook, not the public beacon
+			clientOnly: true,
 			consentVerdict: p.consent, // verdict enregistre sur la commande (mode avance)
 			clientData: {
 				value: num(p.value),
@@ -2199,26 +1811,9 @@
 		});
 	}
 
-	// add_to_cart — wire the common WooCommerce signals:
-	//   - AJAX add-to-cart (archive/shop loop) fires this jQuery event;
-	//   - single-product form submit (no AJAX) we catch on submit.
 	function wireAddToCart() {
-		// ---- WooCommerce Blocks -------------------------------------------
-		// Block themes add to the cart through the Store API and nothing else:
-		// no jQuery event, no form submit, no link. All three handlers below
-		// are blind to them, so a shop on a modern theme reported browsing and
-		// purchases with an empty middle.
-		//
-		// We observe the documented Store API call rather than listen for a
-		// block event, deliberately. The events blocks emit vary by version and
-		// several do not carry the product at all; the REST contract does, and
-		// it is stable: POST .../wc/store/v1/cart/add-item with {id, quantity}.
-		// Watching the request means we read the same id the shop just used.
-		//
-		// The wrapper is observe-only and paranoid: it always calls through,
-		// never inspects the response body, never throws, and reads only its
-		// own copy of the request. Tracking sits on the storefront and on the
-		// checkout — it may cost an event, never a sale.
+		// WooCommerce Blocks add through the Store API only: observe POST .../cart/add-item. The
+		// wrapper always calls through and never throws.
 		try {
 			if (typeof window.fetch === 'function' && !window.__dfssFetchWrapped) {
 				window.__dfssFetchWrapped = true;
@@ -2237,9 +1832,8 @@
 							var payload = null;
 							try { payload = JSON.parse(body); } catch (e) {}
 							if (payload && payload.id) {
-								// Only once the server accepted it: a rejected
-								// add (out of stock, invalid variation) is not
-								// an add to cart.
+								// Only once the server accepted it: a rejected add (out of stock, invalid variation) is not an
+								// add to cart.
 								out.then(function (res) {
 									try {
 										if (res && res.ok) {
@@ -2255,7 +1849,7 @@
 			}
 		} catch (e) {}
 
-		// jQuery AJAX add-to-cart (WooCommerce core). Guard for jQuery presence.
+		// jQuery AJAX add-to-cart (WooCommerce core).
 		if (window.jQuery) {
 			window.jQuery(document.body).on('added_to_cart', function (evt, fragments, cart_hash, $button) {
 				var id = '';
@@ -2269,15 +1863,6 @@
 				fireAddToCart(id, qty, cardName);
 			});
 		}
-		// Plain `?add-to-cart=` links — the shop loop of many themes, and the
-		// fallback WooCommerce itself renders when AJAX add-to-cart is off.
-		// Measured on a live shop: the theme fired the AJAX event but its
-		// button carried no `data-product_id`, and a listing page has no
-		// product context to fall back on, so the event went out naming
-		// nothing. The id was in the href the whole time.
-		//
-		// Safe beside the AJAX handler above: fireAddToCart de-duplicates on
-		// the id within a short window, so a theme that does both reports once.
 		document.addEventListener('click', function (e) {
 			var link = e.target && e.target.closest ? e.target.closest('a[href*="add-to-cart="]') : null;
 			if (!link) {
@@ -2298,36 +1883,17 @@
 			var qtyEl = form.querySelector('[name="quantity"]');
 			var qty = qtyEl ? (parseInt(qtyEl.value, 10) || 1) : 1;
 			// Four places, because no single one is reliable across themes.
-			// The variation input wins when present: on a variable product
-			// `add-to-cart` holds the PARENT id and `variation_id` the one that
-			// was actually bought.
 			var el = form.querySelector('[name="variation_id"]')
 				|| form.querySelector('[name="add-to-cart"]')
 				|| form.querySelector('[name="product_id"]')
 				|| form.querySelector('button[name="add-to-cart"][value]');
 			var id = el ? (el.value || el.getAttribute('value') || '') : '';
-			// The submit itself is proof of an add-to-cart; the id is not always
-			// in the form. Firing with none is still better than losing the
-			// step, and fireAddToCart falls back to the page's own product.
+			// The submit itself is proof of an add-to-cart; the id is not always in the form.
 			fireAddToCart(id, qty);
 		});
 	}
 
 	// The product NAME out of the card the button sits in.
-	//
-	// Added because a product added from a LISTING arrived with an id and
-	// nothing else, so the console showed a row headed "8005" — a number the
-	// merchant has no way to recognise. The page has no product context there
-	// (that only exists on a product page), so the name has to come from the
-	// card itself.
-	//
-	// Theme-independent on purpose: this shop's theme uses none of
-	// WooCommerce's standard loop markup, no `li.product`, no
-	// `.woocommerce-loop-product__title`, not even an aria-label. What every
-	// card DOES have is a link to the product page with the product name as
-	// its text. So: walk up a few levels, take the longest link text that is
-	// not the add-to-cart button itself. Wrong guesses cost a name, never an
-	// event — an empty result simply sends no name, exactly as before.
 	function nameFromCard(el) {
 		try {
 			var node = el;
@@ -2347,8 +1913,7 @@
 		return '';
 	}
 
-	// The product id out of a WooCommerce add-to-cart URL, e.g.
-	// /cart/?add-to-cart=8001 or /?add-to-cart=8001&quantity=2.
+	// The product id out of an add-to-cart URL, e.g. /?add-to-cart=8001&quantity=2.
 	function idFromAddToCartHref(href) {
 		if (!href) {
 			return '';
@@ -2357,30 +1922,12 @@
 		return m ? m[1] : '';
 	}
 
-	// Guard against the same add-to-cart being reported twice (some themes fire
-	// both the AJAX `added_to_cart` event AND submit the form): ignore a repeat
-	// for the same product id within a short window.
 	var lastAddToCart = {};
 	function fireAddToCart(id, qty, cardName) {
 		id = id ? String(id) : '';
 		qty = qty || 1;
 
-		// ---- the product this is about -----------------------------------
-		// Measured on datafirefly.com before this was written: 35 add-to-cart
-		// events over 28 days, NONE of which said which product. On the same
-		// day, with the same plugin, view_content carried its product line 25
-		// times out of 34 and purchase once out of two — so it was never a
-		// question of an outdated module. The id came from the button's
-		// `data-product_id`, which the AJAX loop provides and a single-product
-		// page does not, and the event was sent anyway with an empty list.
-		//
-		// The merchant then read "0" in the Added-to-cart column and
-		// understood "nobody put it in their basket", when it meant "no
-		// add-to-cart told us which product". Two different statements.
-		//
-		// The page's own product context is the fallback, and it is the
-		// reliable one: PHP injects it for view_content, so on a product page
-		// we always know what was added even when the button says nothing.
+		// Fall back on the page's own product: a single-product button often carries no id.
 		var v = EVENTS.viewItem;
 		if (!id && v && v.id) {
 			id = String(v.id);
@@ -2393,12 +1940,7 @@
 		}
 		lastAddToCart[dedupKey] = now;
 
-		// Name and price when the page is about THIS product — the same three
-		// fields view_content sends. Without them the console can only show an
-		// id, so a merchant reads a row of numbers instead of a product. Only
-		// filled when the ids match: a loop add-to-cart is about a different
-		// product from the one the page describes, and copying the page's name
-		// onto it would label the row with the wrong article.
+		// Name and price when the page is about THIS product, the same three fields view_content sends.
 		var line = { id: id, quantity: qty };
 		var name;
 		var price;
@@ -2406,9 +1948,6 @@
 			name = v.name;
 			price = num(v.value);
 		} else if (cardName) {
-			// From a listing: the card gives the name, never a price — the
-			// displayed price may be a range, a "from" price or struck
-			// through, and a wrong amount is worse than none.
 			name = cardName;
 		}
 		if (name) { line.name = name; }
@@ -2426,18 +1965,7 @@
 		});
 	}
 
-	// ---- merchandising: lists, item clicks, promotions ----------------------
-	//
-	// GA4-native reporting for product lists and promotions. These four events
-	// are BEACON-ONLY (not standard Meta/TikTok pixel events, so fireClient is a
-	// no-op for them); the dispatcher maps them to GA4's recommended params
-	// (item_list_id/name, promotion_id/name, creative_*). Two ways to feed them:
-	//   1. A documented data-attribute convention (works on ANY theme) —
-	//      container [data-df-item-list], items [data-df-item-id]; promo blocks
-	//      [data-df-promotion-id]. This is the authoritative, opt-in path.
-	//   2. Best-effort WooCommerce auto-detection of the standard product grid
-	//      (li.product) — only when the convention is NOT used on the page, so
-	//      the two never double-fire.
+	// ---- merchandising: lists, item clicks, promotions ------------------------
 
 	var MAX_LIST_ITEMS = 50;
 
@@ -2473,7 +2001,7 @@
 		return ctx;
 	}
 
-	// view_item_list — one per convention list container on the page.
+	// view_item_list, one per convention list container on the page.
 	function trackConventionLists() {
 		var containers = document.querySelectorAll('[data-df-item-list]');
 		for (var i = 0; i < containers.length; i++) {
@@ -2495,7 +2023,7 @@
 		}
 	}
 
-	// select_item — click on any element inside a convention item.
+	// select_item, click on any element inside a convention item.
 	function wireConventionSelectItem() {
 		document.addEventListener('click', function (e) {
 			var el = e.target && e.target.closest ? e.target.closest('[data-df-item-id]') : null;
@@ -2508,15 +2036,8 @@
 		}, true);
 	}
 
-	// WooCommerce fallback: the standard product grid. Covers BOTH the classic
-	// loop (ul.products li.product — classic themes + [products] shortcode) AND
-	// the block "Product Collection" (li.product inside
-	// .wp-block-woocommerce-product-template — the default on block themes like
-	// Twenty Twenty-*). Only used when the merchant did NOT tag a
-	// [data-df-item-list] on the page.
+	// WooCommerce fallback: the standard product grid.
 	var WOO_GRID_ITEM = 'ul.products li.product, .wp-block-woocommerce-product-template li.product';
-	// Set once wireWooProductGrid() has attached its click handler, so the
-	// content-list fallback below does not attach a second one for the same grid.
 	var wooGridOwnsClicks = false;
 
 	function wireWooProductGrid() {
@@ -2561,17 +2082,7 @@
 			var p = wooItem(lis[i]);
 			if (p) { products.push(p); }
 		}
-		// Do NOT list the page twice. On a product category archive the server
-		// already sent view_item_list, with ids read from WordPress rather than
-		// scraped from markup. Our own theme does not match WOO_GRID_ITEM so
-		// nothing ever doubled here; a shop on a stock storefront (Storefront,
-		// verified) sent two of them for one page view, silently.
-		//
-		// The CLICKS stay wired all the same, and that is the point of splitting
-		// the two: this handler finds the product by its grid item, which is
-		// exact, where the content-list fallback has to match the link text
-		// against the title and misses a click on the product image. So the
-		// server names the list, the DOM names what was clicked.
+		// Do not list the page twice: on a category archive the server already sent view_item_list.
 		var servedList = EVENTS.contentList && EVENTS.contentList.products && EVENTS.contentList.products.length;
 		if (products.length && !servedList) {
 			track('view_item_list', { beaconData: { listName: listName, products: products } });
@@ -2582,7 +2093,7 @@
 		document.addEventListener('click', function (e) {
 			var li = e.target && e.target.closest ? e.target.closest(WOO_GRID_ITEM) : null;
 			if (!li) { return; }
-			// Ignore add-to-cart button clicks — those are add_to_cart, not select_item.
+			// Ignore add-to-cart button clicks, those are add_to_cart, not select_item.
 			if (e.target.closest && e.target.closest('.add_to_cart_button')) { return; }
 			var p = wooItem(li);
 			if (!p) { return; }
@@ -2590,8 +2101,6 @@
 		}, true);
 	}
 
-	// Promotions — convention only ([data-df-promotion-id] or [data-df-promotion]).
-	// view_promotion when the block first becomes visible; select_promotion on click.
 	function promoData(el) {
 		var id = attr(el, 'data-df-promotion-id') || attr(el, 'data-df-promotion');
 		if (!id) { return null; }
@@ -2641,27 +2150,18 @@
 		}, true);
 	}
 
-	// ---- lead-gen: forms ----------------------------------------------------
-	//
-	// lead + complete_registration ARE standard Meta/TikTok events, so these fire
-	// the client pixel AND beacon. Convention: any form tagged [data-df-lead] or
-	// [data-df-register]. Plus WooCommerce auto: the My Account registration form.
+	// ---- lead-gen: forms ------------------------------------------------------
 
 	var leadFired = { lead: false, complete_registration: false };
 
 	function fireLead(kind) {
-		// Debounce: a form can submit twice (validation re-submit) — one per page.
+		// Debounce: a form can submit twice (validation re-submit), one per page.
 		if (leadFired[kind]) { return; }
 		leadFired[kind] = true;
 		track(kind, { clientData: {}, beaconData: {} });
 	}
 
-	// Does this form look like a lead form rather than a search box, a login,
-	// a comment or a filter? An email field is the discriminator: nothing else
-	// on a page asks for one. Deliberately a heuristic and not a list of
-	// selectors — requiring the site owner to tag every form with
-	// [data-df-lead] means the events arrive only where somebody remembered,
-	// which on dotsland.com was one form in a month.
+	// Does this form look like a lead form rather than a search box, a login, a comment or a filter?
 	function looksLikeLeadForm(form) {
 		try {
 			if (form.matches('[data-df-lead]')) { return true; }
@@ -2683,9 +2183,6 @@
 					fireLead('complete_registration');
 					return;
 				}
-				// A form handled by one of the plugins below reports its own
-				// SUCCESS a moment later; firing here as well would count the
-				// same lead twice, and would also count the failures.
 				if (form.matches('.wpcf7-form, .wpforms-form, .gform_wrapper form, .elementor-form, .nf-form-cont form')) { return; }
 				if (looksLikeLeadForm(form)) {
 					fireLead('lead');
@@ -2693,9 +2190,7 @@
 			} catch (err) {}
 		}, true);
 
-		// The form plugins that KNOW whether the message got through. Success is
-		// the honest moment to report a lead: a form that failed validation, or
-		// whose mail bounced at the server, did not produce a prospect.
+		// The form plugins that KNOW whether the message got through.
 		document.addEventListener('wpcf7mailsent', function () { fireLead('lead'); }, false); // Contact Form 7
 		if (window.jQuery) {
 			window.jQuery(document).on('wpformsAjaxSubmitSuccess', function () { fireLead('lead'); });
@@ -2705,161 +2200,11 @@
 		}
 	}
 
-
-	// ---- lead-gen and engagement: the events an institutional site has ------
-	//
-	// A site that sells nothing still converts: it is contacted, subscribed to,
-	// booked, shared and applied to. None of that used to leave a trace, so the
-	// console showed a shop-shaped funnel of zeros next to an inbox that was
-	// filling up. Each wiring below is generic on purpose — it must work on a
-	// theme nobody here has ever seen — with a [data-df-*] attribute as the
-	// explicit override when a site wants to be exact.
-
 	function firstMatch(el, selector) {
 		return el && el.closest ? el.closest(selector) : null;
 	}
 
-	// contact — a click on an address or a phone number. On an institutional
-	// site this is frequently the ONLY conversion: no form, just the mailto in
-	// the footer.
-	function wireContactLinks() {
-		document.addEventListener('click', function (e) {
-			var a = firstMatch(e.target, 'a[href^="mailto:"], a[href^="tel:"], [data-df-contact]');
-			if (!a) { return; }
-			var href = String(a.getAttribute('href') || '');
-			// The address itself is NOT sent: it is the shop's own, it would be
-			// personal data on the page, and knowing WHICH mailbox was clicked
-			// adds nothing to knowing that someone reached out.
-			track('contact', {
-				clientData: {},
-				beaconData: { method: href.indexOf('tel:') === 0 ? 'phone' : 'email' }
-			});
-		}, true);
-	}
-
-	// schedule — a booking link. Calendly and its equivalents open in a new tab
-	// or an overlay, so nothing else on our side would ever see it.
-	function wireScheduleLinks() {
-		var hosts = 'calendly.com|cal.com|savvycal.com|meetings.hubspot.com|app.acuityscheduling.com|zcal.co|tidycal.com|youcanbook.me';
-		var re = new RegExp('(' + hosts + ')', 'i');
-		document.addEventListener('click', function (e) {
-			var a = firstMatch(e.target, 'a[href], [data-df-schedule]');
-			if (!a) { return; }
-			if (!a.matches('[data-df-schedule]') && !re.test(String(a.getAttribute('href') || ''))) { return; }
-			track('schedule', { clientData: {}, beaconData: {} });
-		}, true);
-	}
-
-	// share — a click on a social share link. Standard sharer URLs, because
-	// every share button in existence ends up pointing at one of them.
-	function wireShareLinks() {
-		var re = /(facebook\.com\/sharer|twitter\.com\/intent|x\.com\/intent|linkedin\.com\/shar|pinterest\.[a-z.]+\/pin\/create|api\.whatsapp\.com\/send|t\.me\/share|reddit\.com\/submit)/i;
-		document.addEventListener('click', function (e) {
-			var a = firstMatch(e.target, 'a[href], [data-df-share]');
-			if (!a) { return; }
-			var href = String(a.getAttribute('href') || '');
-			if (!a.matches('[data-df-share]') && !re.test(href)) { return; }
-			var network = (href.match(/(facebook|twitter|x|linkedin|pinterest|whatsapp|telegram|reddit)/i) || [])[1];
-			track('share', {
-				clientData: {},
-				beaconData: network ? { method: String(network).toLowerCase() } : {}
-			});
-		}, true);
-	}
-
-	// start_trial — the free-plan / trial CTA, in the languages this product is
-	// actually sold in rather than English only.
-	function wireTrialLinks() {
-		var re = /(free-?trial|start-?free|\/trial|essai-?gratuit|\/gratuit|kostenlos|\/gratis|prova-?gratuita|signup-?free|zdarma|bezplatn)/i;
-		document.addEventListener('click', function (e) {
-			var a = firstMatch(e.target, 'a[href], [data-df-trial]');
-			if (!a) { return; }
-			if (!a.matches('[data-df-trial]') && !re.test(String(a.getAttribute('href') || ''))) { return; }
-			track('start_trial', { clientData: {}, beaconData: {} });
-		}, true);
-		document.addEventListener('submit', function (e) {
-			var f = e.target;
-			if (!f || f.nodeName !== 'FORM') { return; }
-			try {
-				if (f.matches('[data-df-trial]') || re.test(String(f.getAttribute('action') || ''))) {
-					track('start_trial', { clientData: {}, beaconData: {} });
-				}
-			} catch (err) {}
-		}, true);
-	}
-
-	// subscribe — a newsletter form. The named ones are the four plugins that
-	// cover most WordPress sites; the fallback is the shape of the thing: an
-	// email field and nothing else to fill in, which is a newsletter box and
-	// not a contact form.
-	var NEWSLETTER_SEL = '.mc4wp-form, .sib-form, form.tnp-form, .mailpoet_form, [data-df-subscribe]';
-	function looksLikeNewsletter(form) {
-		try {
-			if (form.matches(NEWSLETTER_SEL)) { return true; }
-			if (!form.querySelector('input[type="email"], input[name*="email" i]')) { return false; }
-			var filled = form.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]), textarea, select');
-			return filled.length === 1; // just the address
-		} catch (err) {
-			return false;
-		}
-	}
-	var subscribeFired = false;
-	function fireSubscribe() {
-		if (subscribeFired) { return; }
-		subscribeFired = true;
-		track('subscribe', { clientData: {}, beaconData: {} });
-	}
-	function wireNewsletterForms() {
-		document.addEventListener('submit', function (e) {
-			var f = e.target;
-			if (f && f.nodeName === 'FORM' && looksLikeNewsletter(f)) { fireSubscribe(); }
-		}, true);
-		// Mailchimp for WordPress reports its own success, which is the honest
-		// moment: a rejected address never subscribed to anything.
-		if (window.jQuery) {
-			window.jQuery(document).on('mc4wp-subscribed', function () { fireSubscribe(); });
-		}
-	}
-
-	// submit_application — a job or partner application: a form asking for a
-	// file AND an address. A file upload alone is an avatar or a support
-	// attachment, which is why both are required.
-	function wireApplicationForms() {
-		document.addEventListener('submit', function (e) {
-			var f = e.target;
-			if (!f || f.nodeName !== 'FORM') { return; }
-			try {
-				var explicit = f.matches('[data-df-application]');
-				if (!explicit && !(f.querySelector('input[type="file"]') && f.querySelector('input[type="email"], input[name*="email" i]'))) { return; }
-				track('submit_application', { clientData: {}, beaconData: {} });
-			} catch (err) {}
-		}, true);
-	}
-
-	// donate / find_location — no reliable generic shape exists for either, so
-	// these are opt-in by attribute rather than guessed at. A charity tags its
-	// donate button once; guessing would have produced a "donation" every time
-	// somebody clicked a button whose label happened to match.
-	function wireTaggedConversions() {
-		[['[data-df-donate]', 'donate'], ['[data-df-find-location]', 'find_location']].forEach(function (pair) {
-			document.addEventListener('click', function (e) {
-				if (firstMatch(e.target, pair[0])) {
-					track(pair[1], { clientData: {}, beaconData: {} });
-				}
-			}, true);
-		});
-		document.addEventListener('submit', function (e) {
-			var f = e.target;
-			if (!f || f.nodeName !== 'FORM') { return; }
-			try {
-				if (f.matches('[data-df-donate]')) { track('donate', { clientData: {}, beaconData: {} }); }
-				else if (f.matches('[data-df-find-location]')) { track('find_location', { clientData: {}, beaconData: {} }); }
-			} catch (err) {}
-		}, true);
-	}
-
-	// search — the results page, with the term WordPress resolved rather than
-	// whatever the address bar happens to hold.
+	// search: the term as WordPress resolved it.
 	function trackSearch() {
 		var q = EVENTS.search;
 		if (!q || !q.searchString) { return; }
@@ -2869,8 +2214,7 @@
 		});
 	}
 
-	// view_item_list — a listing page on a site with no shop: the blog index,
-	// a category, a search result page.
+	// view_item_list on a listing page (blog index, category, search results).
 	function trackContentList() {
 		var l = EVENTS.contentList;
 		if (!l || !l.products || !l.products.length) { return; }
@@ -2885,19 +2229,16 @@
 		});
 	}
 
-	// select_item — which entry of that listing was actually opened.
+	// select_item: which entry of that listing was opened.
 	function wireContentListClicks() {
 		var l = EVENTS.contentList;
 		if (!l || !l.products || !l.products.length) { return; }
-		// A WooCommerce grid on the same page already wires clicks, and does it
-		// better: it reads the product id off the item, this one matches the
-		// link text against the title. Two handlers would send two select_item.
 		if (wooGridOwnsClicks) { return; }
 		document.addEventListener('click', function (e) {
 			var a = firstMatch(e.target, 'a[href]');
 			if (!a) { return; }
-			// Match the link to a listed entry by its title: the markup around
-			// a card differs in every theme, the title does not.
+			// Match the link to a listed entry by its title: the markup around a card differs in every theme,
+			// the title does not.
 			var text = (a.textContent || '').trim().toLowerCase();
 			if (!text) { return; }
 			for (var i = 0; i < l.products.length; i++) {
@@ -2913,9 +2254,6 @@
 		}, true);
 	}
 
-	// view_cart — the cart page. add_to_cart and initiate_checkout cannot tell
-	// apart a visitor who assembled a basket and stopped from one who never
-	// reached it; this can.
 	function trackViewCart() {
 		var c = EVENTS.cart;
 		if (!c || !c.products) { return; }
@@ -2931,8 +2269,6 @@
 		});
 	}
 
-	// remove_from_cart / customize_product / add_shipping_info / add_to_wishlist
-	// — the WooCommerce signals the connector did not listen for.
 	function wireCartAndCheckoutExtras() {
 		if (window.jQuery) {
 			// Woo fires this on the cart page when a line is removed.
@@ -2948,8 +2284,7 @@
 				});
 			});
 		}
-		// Shipping method chosen at checkout — the step between the cart and
-		// the payment, and the one where a shipping price loses the sale.
+		// Shipping method chosen at checkout.
 		var shippingSent = false;
 		document.addEventListener('change', function (e) {
 			var t = e.target;
@@ -2967,23 +2302,16 @@
 		}, true);
 	}
 
-	// ---- boot ---------------------------------------------------------------
+	// ---- boot -----------------------------------------------------------------
 
 	function boot() {
-		// L'identifiant de clic n'existe que dans l'URL d'atterrissage. On le
-		// lit tout de suite et on le porte de page en page — rien n'est ecrit,
-		// donc rien n'est soumis au consentement. L'ECRITURE du cookie, elle,
-		// reste derriere le consentement : cette limite ne bouge pas.
+		// Click ids live only in the landing URL: read them now and carry them on internal links.
+		// Nothing is stored before consent; captureClickIds writes the cookies afterwards.
 		readPendingClickIds();
 		wireClickIdPassthrough();
-
-		// Capture click ids regardless of consent? No — cookies that aid ad
-		// matching are themselves consent-gated. Only after consent.
 		whenConsent(captureClickIds);
 
-		// Auto events for the current page (each is internally consent-gated).
-		// Mode avance : le refus par defaut, puis les balises Google, AVANT le
-		// premier evenement. Sans l'option, rien ne change.
+		// Consent Mode advanced: default denial and Google tags before the first event.
 		CM_ON = DFSS_CM.isAdvanced(CONSENT, PUBLIC);
 		if (CM_ON) {
 			DFSS_CM.boot(cmEnv());
@@ -2998,8 +2326,7 @@
 		trackPurchase();
 		trackConventionLists();
 
-		// Interaction wiring (the listeners themselves are cheap; the events
-		// they fire are consent-gated inside track()).
+		// Interaction wiring. Listeners are cheap; the events are consent-gated inside track().
 		wireAddToCart();
 		wireAddPaymentInfo();
 		wireConventionSelectItem();
@@ -3007,13 +2334,6 @@
 		wirePromotions();
 		wireLeadForms();
 		wireContentListClicks();
-		wireContactLinks();
-		wireScheduleLinks();
-		wireShareLinks();
-		wireTrialLinks();
-		wireNewsletterForms();
-		wireApplicationForms();
-		wireTaggedConversions();
 		wireCartAndCheckoutExtras();
 	}
 

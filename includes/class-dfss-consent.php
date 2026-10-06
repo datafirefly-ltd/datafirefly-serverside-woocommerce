@@ -1,25 +1,6 @@
 <?php
 /**
- * DataFirefly Server-Side (WooCommerce) — consent gate (GDPR).
- *
- * Single source of truth for "may we fire tracking right now?". Both layers are
- * gated:
- *   - Client (assets/dfss-tracker.js): the tracker is told whether consent is
- *     required and which signals to watch; it injects nothing and beacons
- *     nothing until marketing consent is granted. This is the PRIMARY gate
- *     because consent state is a browser concern (banners, TCF, live changes).
- *   - Server (this class, used by class-dfss-rest.php): a defense-in-depth check
- *     on the incoming beacon. When the WP Consent API is active its state is
- *     readable server-side (cookie-backed), so we honour an explicit DENY. When
- *     no machine-readable signal exists server-side we fall back to the admin
- *     setting (see has_consent()).
- *
- * Detection covers the common stacks: the official WP Consent API
- * (function_exists('wp_has_consent')), Complianz, Cookiebot, and IAB TCF v2
- * (__tcfapi) — the last three are surfaced to the JS layer, which can read them
- * in real time.
- *
- * Nothing here ever throws: a consent hiccup must never break a page render.
+ * Consent gate (GDPR). The browser gate is primary; this server check is defense in depth.
  */
 if (!defined('ABSPATH')) {
     exit;
@@ -43,15 +24,6 @@ class DFSS_Consent
     /**
      * Server-side consent decision for an incoming beacon.
      *
-     * Logic (fail-safe, privacy-first where we have a signal):
-     *   1. Gating off  -> always allowed.
-     *   2. WP Consent API present -> honour wp_has_consent('marketing') as the
-     *      authoritative answer (it is cookie-backed, readable server-side).
-     *   3. No server-readable signal -> trust the client gate (which already
-     *      refused to beacon without consent) and allow. The browser is the
-     *      authority for banner/TCF state, and a beacon only exists because the
-     *      tracker decided consent was granted.
-     *
      * @param array $opts Plugin options.
      *
      * @return bool True if the event may be forwarded.
@@ -62,48 +34,31 @@ class DFSS_Consent
             return true;
         }
 
-        // DataFirefly Cookie Consent (our own banner) — read its cookie
-        // server-side (fixed name "dfcc_consent", base64 JSON). Authoritative
-        // when present: drop the event unless marketing consent is granted.
+        // DataFirefly Cookie Consent (our own banner), read its cookie server-side (fixed name
+        // "dfcc_consent", base64 JSON).
         $dfcc = self::dfcc_marketing_consent();
         if ($dfcc !== null) {
             return $dfcc;
         }
 
         if (function_exists('wp_has_consent')) {
-            // The official API. If marketing consent is explicitly denied we
-            // drop the event regardless of what the browser claimed.
+            // The official API. If marketing consent is explicitly denied we drop the event regardless
+            // of what the browser claimed.
             return (bool) wp_has_consent('marketing');
         }
 
-        // Every other consent tool, read from its own cookie. Purely additive:
-        // this only speaks where the code above said nothing, and where it used
-        // to fall through to "allow" on the assumption that the browser gate had
-        // already decided. That assumption does not hold for the events the
-        // browser never sees — an order created in the back office, a gateway
-        // callback, a webhook replay — and those were being forwarded whatever
-        // the shopper had answered.
+        // Every other consent tool, read from its own cookie.
         $cmp = self::dfssCmpFromCookies($_COOKIE);
         if ($cmp !== null) {
             return $cmp;
         }
 
         // No machine-readable server signal: the client gate is authoritative.
-        // The tracker does not beacon unless consent was granted, so allow.
         return true;
     }
 
     /**
-     * Consent verdict for an event the SERVER builds on its own: the purchase
-     * at checkout, the login. Unlike has_consent(), there is no browser gate
-     * to defer to here, so the fallback flips: no readable signal is a
-     * refusal, exactly as the tracker answers when it is required and cannot
-     * tell (hasMarketingConsent() in assets/dfss-tracker.js). Until the audit
-     * of 2026-09-04 (M1) the purchase never asked and shipped every billing
-     * field labelled 'granted' as soon as gating was switched on.
-     *
-     * Read at checkout and persisted on the order (_dfss_consent), because the
-     * purchase hook can fire later from a gateway callback with no cookies.
+     * Consent verdict for server-built events (purchase, login): no readable signal means 'denied'.
      *
      * @param array $opts Plugin options.
      *
@@ -134,10 +89,7 @@ class DFSS_Consent
     }
 
     /**
-     * Marketing-consent decision from the DataFirefly Cookie Consent cookie,
-     * read server-side. The cookie ("dfcc_consent") is base64(JSON) carrying a
-     * `categories` map. Returns true/false, or null when the cookie is absent
-     * or unreadable (so the caller falls back to other signals).
+     * Marketing-consent decision from the DataFirefly Cookie Consent cookie, read server-side.
      *
      * @return bool|null
      */
@@ -146,8 +98,6 @@ class DFSS_Consent
         if (empty($_COOKIE['dfcc_consent'])) {
             return null;
         }
-        // sanitize_text_field cannot alter a valid base64 string; strict
-        // base64_decode() below then rejects anything that is not clean base64.
         $raw = base64_decode(sanitize_text_field(wp_unslash($_COOKIE['dfcc_consent'])), true);
         if (!$raw) {
             return null;
@@ -173,16 +123,12 @@ class DFSS_Consent
     /**
      * Best-effort detection of a known consent banner, for the client config.
      *
-     * The JS layer uses this hint to pick which live signal to watch. Detection
-     * is heuristic (plugin presence) — the tracker still verifies the actual
-     * granted/denied state at runtime.
-     *
      * @return string One of: 'wp_consent_api', 'complianz', 'cookiebot',
      *                'tcf', '' (none detected).
      */
     public static function detect_cmp()
     {
-        // DataFirefly Cookie Consent (our own banner) — preferred when active.
+        // DataFirefly Cookie Consent (our own banner), preferred when active.
         if (defined('DFCC_VERSION') || class_exists('DataFirefly\\CookieConsent\\Plugin')) {
             return 'dfcc';
         }
@@ -198,8 +144,8 @@ class DFSS_Consent
             return 'cookiebot';
         }
 
-        // IAB TCF can only be confirmed in the browser (__tcfapi); we can't
-        // detect it reliably from PHP, so the tracker probes for it.
+        // IAB TCF can only be confirmed in the browser (__tcfapi); we can't detect it reliably from
+        // PHP, so the tracker probes for it.
         return '';
     }
 
@@ -216,14 +162,8 @@ class DFSS_Consent
             'required' => self::is_required($opts),
             'cmp' => self::detect_cmp(),
             'hasWpConsentApi' => self::has_wp_consent_api(),
-            // Deux decisions qui appartiennent au marchand, responsable de
-            // traitement, et non a nous. Une cle jamais ecrite vaut son defaut :
-            // propagation active, retenue eteinte.
             'holdMinutes' => max(0, min(1440, isset($opts['consent_hold_minutes']) ? (int) $opts['consent_hold_minutes'] : 0)),
             'clickIdPassthrough' => !isset($opts['clickid_passthrough']) || (int) $opts['clickid_passthrough'] !== 0,
-            // Mode avance Google Consent Mode : trois decisions du marchand.
-            // Une cle jamais ecrite vaut son defaut : mode de base, refus
-            // partout, identifiant de clic masque.
             'googleMode' => (isset($opts['google_consent_mode']) && $opts['google_consent_mode'] === 'advanced') ? 'advanced' : 'basic',
             'consentRegion' => (isset($opts['consent_default_region']) && $opts['consent_default_region'] === 'eea') ? 'eea' : 'all',
             'adsDataRedaction' => !isset($opts['ads_data_redaction']) || (int) $opts['ads_data_redaction'] !== 0,

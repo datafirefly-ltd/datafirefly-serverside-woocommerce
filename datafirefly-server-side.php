@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.27.0
+ * Version:           2.28.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -17,13 +17,9 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Another copy of this plugin is already loaded: the one the DataFirefly
-// client space shipped before 2.27.0, in the "datafirefly-serverside" folder
-// (see includes/class-dfss-legacy.php). Declaring the same classes twice is a
-// fatal error, so this copy stays out of the way. When it is the one being
-// activated, it takes over: the older copy is switched off, silently so its
-// deactivation does not unschedule the cron hooks both copies share, and the
-// settings, stored under the same names, carry over as they are.
+// A pre-2.27.0 copy (folder "datafirefly-serverside") is already loaded: declaring the classes
+// twice is fatal, so step aside. On activation, this copy switches the old one off and takes over
+// its settings (see includes/class-dfss-legacy.php).
 if (defined('DFSS_VERSION')) {
     if (!function_exists('dfss_take_over_legacy_copy')) {
         function dfss_take_over_legacy_copy()
@@ -36,7 +32,7 @@ if (defined('DFSS_VERSION')) {
     return;
 }
 
-define('DFSS_VERSION', '2.27.0');
+define('DFSS_VERSION', '2.28.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -62,52 +58,56 @@ class DFSS_Plugin
     const OPTION = 'dfss_settings';
     const PUBLIC_OPTION = 'dfss_public_config'; // cached public ids from the dispatcher
 
+    /** @var array|null Per-request cache of opts(), flushed whenever the option changes. */
+    private $opts_cache = null;
+
     public function __construct()
     {
-        // --- admin ---
+        // ---- admin ---------------------------------------------------------
         add_action('admin_menu', array($this, 'admin_menu'));
         add_action('admin_init', array($this, 'maybe_save'));
-        // Seamless upgrade: the first admin request on a new version refreshes
-        // the cached public ids (so a v1->v2 upgrade lights up client tags with
-        // no manual "Refresh" click). Admin-gated so a visitor never pays the call.
+        // The first admin request on a new version refreshes the cached public ids.
         add_action('admin_init', array($this, 'maybe_upgrade'));
+        add_action('admin_init', array(__CLASS__, 'ensure_cron'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin'));
         add_action('wp_ajax_dfss_activity', array($this, 'ajax_activity'));
 
-        // --- server-side purchase (unchanged, backward compatible) ---
-        // Capture browser cookies at checkout (browser context) onto the order,
-        // so the purchase hook can use them even when it fires from a gateway.
+        foreach (array('add_option_', 'update_option_', 'delete_option_') as $dfss_hook) {
+            add_action($dfss_hook . self::OPTION, array($this, 'flush_opts'));
+        }
+
+        // ---- server-side events --------------------------------------------
+        // Cookies and consent are captured at checkout, where the browser is; the purchase hook
+        // may fire later from a gateway webhook that has none.
         add_action('woocommerce_checkout_create_order', array($this, 'capture_cookies'), 10, 2);
-        // The block checkout (Store API), WooCommerce's default since 8.3, never
-        // fires the hook above.
+        // The block checkout (Store API), WooCommerce's default since 8.3, never fires the hook above.
         add_action('woocommerce_store_api_checkout_update_order_from_request', array($this, 'capture_cookies_store_api'), 10, 2);
-        // Send the purchase once payment is in. Idempotent across all triggers.
+        // Send the purchase once payment is in. Idempotent across the three hooks.
         add_action('woocommerce_payment_complete', array($this, 'on_purchase'));
         add_action('woocommerce_order_status_processing', array($this, 'on_purchase'));
         add_action('woocommerce_order_status_completed', array($this, 'on_purchase'));
-        // Refunds. `woocommerce_order_refunded` fires for both a partial and a
-        // full refund, and passes the refund id — which is what makes each one
-        // a distinct, deduplicable event.
+        // Fires for partial and full refunds, with the refund id.
         add_action('woocommerce_order_refunded', array($this, 'on_refund'), 10, 2);
-
-        // login — server-side, because it is the one conversion the browser
-        // cannot witness honestly: WordPress redirects away from the form, so a
-        // click handler fires before anyone knows whether the password was
-        // right. This hook only runs once it WAS.
+        // Server-side: only this hook knows the password was right.
         add_action('wp_login', array($this, 'on_login'), 10, 2);
 
-        // --- client tracking layer (new in v2.0, additive + gated) ---
+        // ---- client tracking layer -----------------------------------------
         add_action('wp_enqueue_scripts', array($this, 'enqueue_tracker'));
-
-        // --- REST beacon endpoint (new) ---
         add_action('rest_api_init', array($this, 'register_rest'));
 
-        // --- retry cron (new) ---
+        // ---- cron ------------------------------------------------------------
         add_filter('cron_schedules', array($this, 'cron_schedules'));
         add_action(DFSS_Queue::CRON_HOOK, array($this, 'run_retry'));
         add_action(DFSS_Truth::CRON_HOOK, array($this, 'run_truth'));
-        // Make sure the schedule survives even if activation predates the cron.
-        add_action('init', array(__CLASS__, 'ensure_cron'));
+        // Self-heal a lost schedule from admin and cron requests only, never on storefront pages.
+        add_action('init', array($this, 'ensure_cron_on_cron'));
+    }
+
+    public function ensure_cron_on_cron()
+    {
+        if (function_exists('wp_doing_cron') && wp_doing_cron()) {
+            self::ensure_cron();
+        }
     }
 
     // ---- activation / deactivation -----------------------------------------
@@ -132,12 +132,7 @@ class DFSS_Plugin
     }
 
     /**
-     * Run once after the plugin version changes (fresh activate or v1->v2
-     * upgrade). Ensures the retry table exists and — when already connected —
-     * refreshes the cached PUBLIC destination ids, so upgrading lights up the
-     * client tags without the operator re-connecting or clicking "Refresh".
-     * Admin-gated (see the admin_init hook) so a storefront visitor never pays
-     * the one-time HTTP call.
+     * Run once after the plugin version changes (fresh activate or v1->v2 upgrade).
      */
     public function maybe_upgrade()
     {
@@ -182,10 +177,6 @@ class DFSS_Plugin
 
     /**
      * Daily: tell the dispatcher what the shop actually sold yesterday.
-     *
-     * Runs whether or not anything sold — a day with zero orders is real data,
-     * and a gap in the reference table reads as a day we failed to measure
-     * rather than a day nobody bought.
      */
     public function run_truth()
     {
@@ -196,56 +187,51 @@ class DFSS_Plugin
         DFSS_Truth::run($o, new DFSS_Client($o['tenant_id'], $o['hmac_secret'], $o['endpoint']));
     }
 
-    // ---- options ------------------------------------------------------------
+    // ---- options -----------------------------------------------------------
 
     /**
-     * @return array{enabled:int,tenant_id:string,hmac_secret:string,endpoint:string,complete_tracking:int,require_consent:int,dest_meta:int,dest_ga4:int,dest_tiktok:int}
+     * Plugin options merged with their defaults. Keys added in later versions get their default
+     * on upgrade (wp_parse_args only fills missing keys), so an upgrade changes no behaviour.
+     *
+     * @return array
      */
     public function opts()
     {
-        return wp_parse_args(
-            get_option(self::OPTION, array()),
-            array(
-                'enabled' => 0,
-                'tenant_id' => '',
-                'hmac_secret' => '',
-                'endpoint' => self::DEFAULT_ENDPOINT,
-                // New in v2.0 — both ON by default (full-funnel + privacy-first).
-                'complete_tracking' => 1,
-                'require_consent' => 1,
-                // New in v2.1 — per-destination client tags. ON by default so
-                // upgrades keep the v2.0 behaviour; a destination without a
-                // public id in the dispatcher config never loads anyway.
-                'dest_meta' => 1,
-                'dest_ga4' => 1,
-                'dest_tiktok' => 1,
-                // Nouveaux en 2.25.0. wp_parse_args ne complete que les cles
-                // ABSENTES : une boutique qui monte de version les recoit donc
-                // a ces valeurs, sans geste de sa part. La propagation est
-                // active — c'est elle qui sauve l'identifiant de clic ; la
-                // retenue est a zero, parce que c'est une decision de
-                // conformite et non un reglage technique.
-                'clickid_passthrough' => 1,
-                'consent_hold_minutes' => 0,
-                // Nouveaux en 2.26.0 : le mode avance Google Consent Mode.
-                // Eteint par defaut. Une boutique qui monte de version garde
-                // exactement son comportement : c'est une decision de
-                // conformite, pas un reglage technique.
-                'google_consent_mode' => 'basic',
-                'consent_default_region' => 'all',
-                'ads_data_redaction' => 1,
-            )
-        );
+        if ($this->opts_cache === null) {
+            $saved = get_option(self::OPTION, array());
+            $this->opts_cache = wp_parse_args(
+                is_array($saved) ? $saved : array(),
+                array_merge(
+                    array(
+                        'enabled' => 0,
+                        'tenant_id' => '',
+                        'hmac_secret' => '',
+                        'endpoint' => self::DEFAULT_ENDPOINT,
+                        'complete_tracking' => 1,
+                        'require_consent' => 1,
+                        'clickid_passthrough' => 1,
+                        // Consent hold and Google advanced mode are compliance decisions: off by default.
+                        'consent_hold_minutes' => 0,
+                        'google_consent_mode' => 'basic',
+                        'consent_default_region' => 'all',
+                        'ads_data_redaction' => 1,
+                    ),
+                    DFSS_Settings::defaults()
+                )
+            );
+        }
+
+        return $this->opts_cache;
+    }
+
+    public function flush_opts()
+    {
+        $this->opts_cache = null;
     }
 
     /**
-     * The public destination ids FILTERED by the per-destination toggles.
-     *
-     * This is the single choke point that guarantees a disabled destination's
-     * third-party script (fbevents.js / gtag.js / TikTok events.js) is NEVER
-     * loaded in the visitor's browser: the tracker only injects a tag when its
-     * public id is present in the localized config, so removing the key here
-     * removes the script, the cookies it would set, and its network calls.
+     * The public destination ids filtered by the destination toggles. The single choke point that
+     * keeps a disabled destination's script out of the browser: no id, no tag.
      *
      * @param array|null $public Raw public config; defaults to the cached one.
      * @param array|null $opts   Plugin options; defaults to opts().
@@ -257,14 +243,7 @@ class DFSS_Plugin
         $public = is_array($public) ? $public : $this->public_config();
         $opts = is_array($opts) ? $opts : $this->opts();
 
-        $map = array('dest_meta' => 'meta', 'dest_ga4' => 'ga4', 'dest_tiktok' => 'tiktok');
-        foreach ($map as $toggle => $key) {
-            if (empty($opts[$toggle])) {
-                unset($public[$key]);
-            }
-        }
-
-        return $public;
+        return DFSS_Settings::filter_public($public, $opts);
     }
 
     private function is_connected()
@@ -275,7 +254,7 @@ class DFSS_Plugin
     }
 
     /**
-     * The cached public destination ids (pixel/measurement ids). Public only.
+     * The cached public destination ids (pixel/measurement ids).
      *
      * @return array
      */
@@ -287,8 +266,7 @@ class DFSS_Plugin
     }
 
     /**
-     * Fetch the public-config from the dispatcher and cache it. Called right
-     * after a successful connect (and refreshable from the admin screen).
+     * Fetch the public-config from the dispatcher and cache it.
      *
      * @param array $opts
      *
@@ -305,7 +283,7 @@ class DFSS_Plugin
         return array('ok' => !empty($res['ok']), 'public' => $res['public'], 'code' => (int) $res['code']);
     }
 
-    // ---- server-side purchase (unchanged behaviour) ------------------------
+    // ---- checkout capture and server events --------------------------------
 
     /**
      * @param WC_Order $order
@@ -313,10 +291,7 @@ class DFSS_Plugin
      */
     public function capture_cookies($order, $data)
     {
-        // The consent verdict, read HERE where the shopper's cookies are, and
-        // kept on the order: the purchase hook may fire later from a gateway
-        // webhook that carries none. Audit 2026-09-04 (M1): the purchase never
-        // checked consent and labelled itself 'granted' regardless.
+        // The consent verdict, read here where the shopper's cookies are, and kept on the order.
         $order->update_meta_data('_dfss_consent', DFSS_Consent::server_verdict($this->opts()));
 
         $map = array('_fbp' => '_dfss_fbp', '_fbc' => '_dfss_fbc', '_ga' => '_dfss_ga', '_ttp' => '_dfss_ttp', '__oppref' => '_dfss_oppref', '__obref' => '_dfss_obref');
@@ -325,13 +300,7 @@ class DFSS_Plugin
                 $order->update_meta_data($meta, sanitize_text_field(wp_unslash($_COOKIE[$cookie])));
             }
         }
-        // Also persist our captured click-id cookies (90-day first-party) so the
-        // server purchase event carries fbc/ttclid/gclid even if the live pixel
-        // cookie is absent.
-        // gbraid and wbraid are issued INSTEAD of gclid when the journey crosses
-        // an app boundary or cookies are restricted, and msclkid is what
-        // Microsoft Advertising attributes on: a purchase carrying one of those
-        // and not gclid is still a paid click.
+        // Our own 90-day click-id cookies, as a fallback when the platform cookie is absent.
         $extra = array(
             '_dfss_fbc' => '_dfss_fbc',
             '_dfss_ttclid' => '_dfss_ttclid',
@@ -346,12 +315,8 @@ class DFSS_Plugin
                 $order->update_meta_data($meta, sanitize_text_field(wp_unslash($_COOKIE[$cookie])));
             }
         }
-        // GA4 session cookie: its name is _ga_<measurementId without the G-
-        // prefix>. Derive it from OUR configured measurement id so we capture the
-        // session of our own property — never a stray _ga_* from another GA4
-        // stream that may also be on the page. The purchase then carries the
-        // session_id and GA4 attributes the conversion to the converting
-        // session's source instead of reporting it as "Unassigned".
+        // GA4 session cookie (_ga_<measurement id without G->) of OUR property only, so the
+        // purchase joins the converting session instead of landing as "Unassigned".
         if (!$order->get_meta('_dfss_ga_session')) {
             $public = $this->public_config();
             $mid = isset($public['ga4']['measurementId'])
@@ -367,13 +332,7 @@ class DFSS_Plugin
     }
 
     /**
-     * The same capture for the block checkout (Store API). The classic hook
-     * never fires there, so a blocks order carried no consent verdict, no click
-     * id and no GA4 session: the server purchase then fell back to the request
-     * or to 'denied', and in Google Consent Mode advanced the thank-you page
-     * had no verdict to act on (review of 29/09/2026). The Store API hands us
-     * the order before its final save; we save it anyway, so the meta cannot
-     * depend on what WooCommerce does next.
+     * The same capture for the block checkout (Store API).
      *
      * @param WC_Order $order
      * @param mixed    $request WP_REST_Request, unused.
@@ -410,13 +369,8 @@ class DFSS_Plugin
                 return;
             }
 
-            // Claim the order BEFORE sending (optimistic lock). Three hooks
-            // (payment_complete / processing / completed) can fire for the same
-            // order in the same request or via overlapping async webhooks; setting
-            // and persisting the marker first means a concurrent second entry sees
-            // it and bails, so we never send the purchase twice. If the send then
-            // fails it is handed to the retry queue (which owns delivery), so a
-            // later status hook must NOT re-send a fresh copy.
+            // Claim the order BEFORE sending (optimistic lock): the three hooks can overlap, and a
+            // failed send belongs to the retry queue, not to a later hook.
             $order->update_meta_data('_dfss_sent', current_time('mysql'));
             $order->save();
 
@@ -438,27 +392,7 @@ class DFSS_Plugin
     }
 
     /**
-     * A refund was issued on an order.
-     *
-     * Deliberately not gated on consent and carrying no personal data (see
-     * DFSS_Event_Builder::build_refund). There is no visitor here: this is the
-     * merchant's own back-office correction. Gating it would mean a shop with
-     * consent required reports its sales and silently swallows their
-     * reversals, which is worse than reporting neither.
-     *
-     * Keyed on the REFUND id, not the order: two partial refunds on one order
-     * are two real events, and replaying the same one must deduplicate.
-     */
-    /**
-     * A visitor who signed in. Fired from wp_login, so a failed attempt never
-     * reaches it — the browser could not tell the two apart.
-     *
-     * Carries the user id only, and only with consent. The comment here used
-     * to promise "the user id, not the address" while the code below sent the
-     * e-mail in clear and said 'not_required' whatever the setting (audit
-     * 2026-09-04, F1). The sign-in request has the visitor's cookies, so the
-     * verdict is read right here; a refusal, or no readable signal, sends
-     * the bare event with no identity and no consent claim.
+     * A visitor signed in. Carries the user id only, and only with consent.
      *
      * @param string  $user_login
      * @param WP_User $user
@@ -478,9 +412,7 @@ class DFSS_Plugin
                 'sourceUrl' => home_url('/'),
                 'actionSource' => 'website',
                 'userData' => array(),
-                // Since dispatcher 0.64.0 a refusal is said, not left out (see
-                // build_purchase). Saying nothing read as 'unknown', which is
-                // what a shop that never asked looks like.
+                // Since dispatcher 0.64.0 a refusal is said, not left out (see build_purchase).
                 'consent' => $verdict,
             );
             if ($verdict !== 'denied' && $user instanceof WP_User) {
@@ -495,6 +427,12 @@ class DFSS_Plugin
         }
     }
 
+    /**
+     * A refund was issued. Not consent-gated and without personal data: no visitor is involved.
+     *
+     * @param int $order_id
+     * @param int $refund_id
+     */
     public function on_refund($order_id, $refund_id)
     {
         try {
@@ -537,9 +475,7 @@ class DFSS_Plugin
     }
 
     /**
-     * Enqueue the client tracker on the storefront, gated by connection +
-     * "Complete tracking". Localizes the PUBLIC ids, consent config, REST URL,
-     * a wp_rest nonce, and the current page's event context.
+     * Enqueue the client tracker on the storefront, gated by connection + "Complete tracking".
      */
     public function enqueue_tracker()
     {
@@ -551,41 +487,64 @@ class DFSS_Plugin
             return;
         }
 
-        $handle = 'dfss-tracker';
-        wp_register_script(
-            $handle,
-            DFSS_PLUGIN_URL . 'assets/dfss-tracker.js',
-            array(),
-            DFSS_VERSION,
-            true // in footer
-        );
+        $public = $this->filtered_public_config(null, $o);
+        // Footer + defer: never blocks rendering. WordPress < 6.3 reads the array as in_footer.
+        $args = array('in_footer' => true, 'strategy' => 'defer');
 
-        wp_localize_script($handle, 'DFSS_CFG', array(
-            // Filtered by the per-destination toggles: a disabled destination's
-            // id never reaches the browser, so its script is never injected.
-            'public' => $this->filtered_public_config(),
+        // Destination modules run before the core, which picks them up at boot. Only the enabled
+        // and configured ones are enqueued: a disabled destination ships no code at all.
+        $deps = array();
+        foreach (DFSS_Settings::DESTINATIONS as $key => $dest) {
+            if ($dest[3] !== '' && DFSS_Settings::is_configured($public, $key)) {
+                $handle = 'dfss-dest-' . $dest[3];
+                wp_register_script($handle, $this->asset_url('dfss-dest-' . $dest[3]), array(), DFSS_VERSION, $args);
+                $deps[] = $handle;
+            }
+        }
+
+        wp_register_script('dfss-tracker', $this->asset_url('dfss-tracker'), $deps, DFSS_VERSION, $args);
+        wp_localize_script('dfss-tracker', 'DFSS_CFG', array(
+            'public' => $public,
             'consent' => DFSS_Consent::js_config($o),
             'restUrl' => esc_url_raw(rest_url(DFSS_REST::REST_NAMESPACE . DFSS_REST::ROUTE)),
             'nonce' => wp_create_nonce('wp_rest'),
-            // Where the tracker fetches a fresh nonce when this page came from
-            // a full-page cache (see DFSS_REST::handle_nonce).
+            // Fresh nonce source for pages served from a full-page cache.
             'nonceUrl' => esc_url_raw(rest_url(DFSS_REST::REST_NAMESPACE . '/nonce')),
+            // The tracker only beacons what the endpoint accepts, and batches what needs no nonce.
+            'beaconEvents' => DFSS_Event_Builder::BEACON_EVENTS,
+            'nonceEvents' => DFSS_REST::NONCE_REQUIRED_EVENTS,
             'events' => $this->page_event_context(),
         ));
+        wp_enqueue_script('dfss-tracker');
 
-        wp_enqueue_script($handle);
+        foreach (DFSS_Settings::MODULES as $key => $module) {
+            if (!empty($o[$key])) {
+                wp_enqueue_script('dfss-' . $module, $this->asset_url('dfss-' . $module), array('dfss-tracker'), DFSS_VERSION, $args);
+            }
+        }
+    }
+
+    /**
+     * URL of a tracker script: the minified build, unless SCRIPT_DEBUG is on or the source is
+     * newer than the build (2 minutes of slack for archive extraction timestamps).
+     *
+     * @param string $name File name without extension, in assets/.
+     *
+     * @return string
+     */
+    private function asset_url($name)
+    {
+        $src = DFSS_PLUGIN_DIR . 'assets/' . $name . '.js';
+        $min = DFSS_PLUGIN_DIR . 'assets/' . $name . '.min.js';
+        $use_min = !(defined('SCRIPT_DEBUG') && SCRIPT_DEBUG)
+            && is_file($min)
+            && (!is_file($src) || filemtime($min) + 120 >= filemtime($src));
+
+        return DFSS_PLUGIN_URL . 'assets/' . $name . ($use_min ? '.min.js' : '.js');
     }
 
     /**
      * The product category to report for a product line, as a human name.
-     *
-     * The archive's own term when we are on one - that is the list the visitor
-     * is actually looking at - and otherwise the product's first category.
-     * Returns '' when WooCommerce is absent or the product has no category;
-     * the builder then simply sends no category rather than an empty one.
-     *
-     * Never the post type: "product" as a GA4 item_category is the same word
-     * on every line of every report, which is worse than no value at all.
      *
      * @param int $post_id
      *
@@ -611,8 +570,8 @@ class DFSS_Plugin
     }
 
     /**
-     * Build the per-page event context the tracker needs (server-authoritative
-     * values for value/currency/products), so the browser never has to guess.
+     * Build the per-page event context the tracker needs (server-authoritative values for
+     * value/currency/products), so the browser never has to guess.
      *
      * @return array
      */
@@ -620,24 +579,14 @@ class DFSS_Plugin
     {
         $ctx = array();
 
-        /* view_content on an ordinary CONTENT page — an article, a service
-           page, a case study.
-           
-           This block sits BEFORE the WooCommerce guard on purpose. It used to
-           sit after, so a site without WooCommerce got an empty context and the
-           tracker had nothing to report but page_view: an institutional site
-           running this plugin measured its audience and none of what that
-           audience actually read. dotsland.com ran a month that way.
-
-           Products are excluded here — a product page already reports
-           view_item just below, with its price, and reporting both would count
-           one page twice. */
+        // view_content on a content page (article, service page...). Built even without WooCommerce;
+        // products report view_item below instead.
         if (is_singular() && !(function_exists('is_product') && is_product())) {
             $dfss_post = get_queried_object();
             if ($dfss_post instanceof WP_Post) {
                 $ctx['content'] = array(
-                    // The post TYPE is part of the id so an article and a page
-                    // that share a number stay two distinct lines.
+                    // The post TYPE is part of the id so an article and a page that share a number
+                    // stay two distinct lines.
                     'id' => $dfss_post->post_type . '-' . (int) $dfss_post->ID,
                     'name' => html_entity_decode(wp_strip_all_tags(get_the_title($dfss_post)), ENT_QUOTES, 'UTF-8'),
                     'category' => $dfss_post->post_type,
@@ -645,11 +594,7 @@ class DFSS_Plugin
             }
         }
 
-        // search — the results page. The term comes from WordPress rather than
-        // from the query string the browser happens to hold, and the dispatcher
-        // caps it at 200 characters and redacts it when it is somebody's email
-        // or phone number: a search box is free text and people paste their own
-        // order confirmation into it.
+        // search: the term as WordPress resolved it.
         if (is_search()) {
             $dfss_q = trim((string) get_search_query());
             if ('' !== $dfss_q) {
@@ -661,9 +606,7 @@ class DFSS_Plugin
             }
         }
 
-        // view_item_list — a listing page: the blog index, a category archive,
-        // an author or date archive. The e-commerce equivalent is handled by
-        // the Woo block below; this is the one an institutional site has.
+        // view_item_list on a listing page (blog index, archive, search results).
         if ((is_home() || is_archive() || is_search()) && !(function_exists('is_shop') && is_shop())) {
             $dfss_items = array();
             if (have_posts()) {
@@ -673,18 +616,7 @@ class DFSS_Plugin
                     if (!$dfss_p instanceof WP_Post) {
                         continue;
                     }
-                    // A WooCommerce PRODUCT is not content, even when
-                    // WordPress serves it through an archive. The single-page
-                    // block above already excludes is_product(); this loop did
-                    // not, so every product category page sent its products as
-                    // "product-5127" with the category "product".
-                    //
-                    // The id shape is the part that matters outside our own
-                    // console: it is what GA4 matches as item_id and what Meta
-                    // matches as content_ids AGAINST THE MERCHANT'S PRODUCT
-                    // FEED, whose ids are bare. A prefixed id matches nothing,
-                    // silently: no error anywhere, just category pages that
-                    // never attribute and dynamic ads that never retarget.
+                    // Products keep their bare id: GA4 and Meta match it against the product feed.
                     if ('product' === $dfss_p->post_type && function_exists('is_product')) {
                         $dfss_items[] = array(
                             'id' => (string) (int) $dfss_p->ID,
@@ -700,9 +632,6 @@ class DFSS_Plugin
                     );
                 }
             }
-            // Name the list from what WordPress is actually showing, so the
-            // GA4 report reads "Categorie : Data & Analytics" rather than a
-            // slug nobody recognises three months later.
             $dfss_list_id = 'archive';
             $dfss_list_name = 'Archive';
             if (is_search()) {
@@ -735,9 +664,7 @@ class DFSS_Plugin
             return $ctx; // WooCommerce not loaded: content context only
         }
 
-        // view_cart — the cart page, which is a funnel step in its own right:
-        // it is where a shop finds out how many people assemble a basket and
-        // then stop, which add_to_cart and initiate_checkout cannot tell apart.
+        // view_cart.
         if (function_exists('is_cart') && is_cart()) {
             $dfss_cart = function_exists('WC') ? WC()->cart : null;
             if ($dfss_cart && !$dfss_cart->is_empty()) {
@@ -767,8 +694,7 @@ class DFSS_Plugin
             }
         }
 
-        // view_item — product page. Resolve from the queried object (never via
-        // the unprefixed $product global — see WPCS PrefixAllGlobals).
+        // view_item on a product page.
         if (is_product()) {
             $dfss_product = wc_get_product(get_queried_object_id());
             if ($dfss_product instanceof WC_Product) {
@@ -781,8 +707,7 @@ class DFSS_Plugin
             }
         }
 
-        // initiate_checkout — checkout page (but NOT the thank-you/order-received
-        // sub-page, which is purchase).
+        // initiate_checkout on the checkout page, except the order-received page (purchase).
         if (function_exists('is_checkout') && is_checkout() && !(function_exists('is_order_received_page') && is_order_received_page())) {
             $cart = function_exists('WC') ? WC()->cart : null;
             if ($cart && !$cart->is_empty()) {
@@ -810,12 +735,10 @@ class DFSS_Plugin
             }
         }
 
-        // purchase — thank-you page. Pin event_id to "order_<id>" so the client
-        // pixel and the server purchase event deduplicate exactly.
+        // purchase on the thank-you page, with event id "order_<id>" to deduplicate with the server.
         if (function_exists('is_order_received_page') && is_order_received_page()) {
-            // Read-only lookup of the public thank-you-page order id; the value
-            // is cast to int and only used to render tracking context. No state
-            // changes, so no nonce applies here.
+            // Read-only lookup of the public thank-you-page order id; the value is cast to int and
+            // only used to render tracking context.
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended
             $order_id = absint(get_query_var('order-received'));
             if (!$order_id && isset($_GET['order-received'])) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
@@ -823,15 +746,8 @@ class DFSS_Plugin
                 $order_id = absint(wp_unslash($_GET['order-received']));
             }
             $order = $order_id ? wc_get_order($order_id) : null;
-            // The thank-you URL carries the order KEY next to the id, and
-            // WooCommerce itself refuses to render the order without it.
-            // Rendering the total and the lines from the id alone let anyone
-            // walk the ids and read every order of the shop (audit 2026-09-04).
-            // Same check as WC_Shortcode_Checkout::order_received().
-            // wc_clean() IS the sanitiser here: it is WooCommerce's own, and applies
-            // sanitize_text_field recursively. PHPCS does not know it, so it reports
-            // an unsanitised read where there is none; hence the second sniff below.
-            // The value is never used for anything but a hash_equals() comparison.
+            // Require the order key, as WooCommerce does: the id alone would expose any order.
+            // wc_clean() is WooCommerce's sanitizer (unknown to PHPCS); the key only feeds hash_equals().
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
             $order_key = isset($_GET['key']) ? wc_clean(wp_unslash($_GET['key'])) : '';
             if ($order instanceof WC_Order && ($order_key === '' || !hash_equals((string) $order->get_order_key(), (string) $order_key))) {
@@ -846,22 +762,9 @@ class DFSS_Plugin
                     }
                     $qty = (int) $item->get_quantity();
                     $num_items += $qty;
-                    // TAX INCLUDED, to match the order value sent just below.
-                    //
-                    // WooCommerce's `get_total()` on an ORDER is the grand
-                    // total with tax and shipping; on an order ITEM it is the
-                    // line NET of tax. Same method name, opposite basis. The
-                    // connector used both without noticing, so a merchant read
-                    // a tax-inclusive figure in the headline and tax-exclusive
-                    // ones in the product table, and the two never added up.
-                    // PrestaShop was right all along: it uses `price_wt`.
+                    // Tax included, like the order value: on an order ITEM, get_total() is net of tax.
                     $line_total = (float) $item->get_total() + (float) $item->get_total_tax();
                     $products[] = array(
-                        // The VARIATION when the line has one: get_product_id()
-                        // returns the parent, and every other funnel step
-                        // already reports the variation. Both purchase paths
-                        // must agree, or the browser pixel and the server event
-                        // would name two different products for one sale.
                         'id' => DFSS_Event_Builder::order_line_id($item),
                         'name' => $item->get_name(),
                         'price' => $qty > 0 ? round($line_total / $qty, 2) : round($line_total, 2),
@@ -872,20 +775,13 @@ class DFSS_Plugin
                     'eventId' => 'order_' . $order->get_id(),
                     'orderId' => (string) $order->get_order_number(),
                     'value' => round((float) $order->get_total(), 2),
-                    // The same order NET of tax. `value` stays what the
-                    // customer was charged, because that is what the ad
-                    // platforms optimise on; this is what the merchant reads
-                    // in their own books, and in B2B it is the only figure
-                    // that means anything. Sent rather than derived: a total
-                    // says nothing about how much of it was tax.
+                    // Net of tax, for the merchant's own reporting.
                     'valueNet' => round((float) $order->get_total() - (float) $order->get_total_tax(), 2),
                     'currency' => $order->get_currency(),
                     'numItems' => $num_items,
                     'products' => $products,
-                    // Le verdict ENREGISTRE sur la commande au checkout, celui
-                    // qui a decide de l'envoi serveur. En mode avance, le
-                    // traqueur s'en sert pour savoir s'il doit envoyer l'achat a
-                    // GA4 lui-meme : seulement si le serveur ne l'a pas fait.
+                    // Verdict stored at checkout. In Consent Mode advanced the tracker sends the purchase
+                    // to GA4 itself only when the server did not.
                     'consent' => (string) $order->get_meta('_dfss_consent'),
                 );
             }
@@ -894,7 +790,7 @@ class DFSS_Plugin
         return $ctx;
     }
 
-    // ---- admin UI -----------------------------------------------------------
+    // ---- admin UI ----------------------------------------------------------
 
     public function admin_menu()
     {
@@ -918,8 +814,8 @@ class DFSS_Plugin
 
     public function enqueue_admin($hook)
     {
-        // Only on our two settings screens.
-        if (strpos((string) $hook, 'datafirefly-server-side') === false
+        // Only on our two screens (settings_page_datafirefly-serverside / -activity).
+        if (strpos((string) $hook, 'datafirefly-serverside') === false
             && strpos((string) $hook, 'datafirefly-activity') === false) {
             return;
         }
@@ -939,17 +835,7 @@ class DFSS_Plugin
     const DEFAULT_ENDPOINT = 'https://serverside.datafirefly.com/v1/events';
 
     /**
-     * Decode a one-paste connection key (dfss_<base64url(json{t,s,e})>) into
-     * config. Returns null if the key is malformed.
-     *
-     * Hardening:
-     *  - tenant id + secret are validated against a safe charset and stored
-     *    VERBATIM (never run through sanitize_text_field, which could silently
-     *    mangle a valid secret and break every signature with an opaque 401).
-     *  - the endpoint embedded in the key is only honoured if it is HTTPS on a
-     *    datafirefly.com host. This stops a socially-engineered hostile key from
-     *    redirecting signed customer events to an attacker. Arbitrary endpoints
-     *    remain available only via the explicit "Advanced" manual entry.
+     * Decode a one-paste connection key (dfss_<base64url(json{t,s,e})>) into config.
      *
      * @param string $raw
      *
@@ -972,8 +858,7 @@ class DFSS_Plugin
 
         $tenant = (string) $data['t'];
         $secret = (string) $data['s'];
-        // Tenant ids and secrets are opaque tokens (hex / base64url / uuid). Allow
-        // that charset only; reject anything else rather than silently altering it.
+        // Tenant ids and secrets are opaque tokens (hex / base64url / uuid).
         if (!preg_match('/^[A-Za-z0-9+\/=_.\-]{1,256}$/', $tenant)
             || !preg_match('/^[A-Za-z0-9+\/=_.\-]{1,512}$/', $secret)) {
             return null;
@@ -985,8 +870,8 @@ class DFSS_Plugin
             if ($this->is_trusted_endpoint($candidate)) {
                 $endpoint = $candidate;
             }
-            // else: silently fall back to the default (do not honour an untrusted
-            // host from the convenience key).
+            // An untrusted host in the key falls back to the default: signed events never leave
+            // datafirefly.com unless typed in the advanced form.
         }
 
         return array(
@@ -1031,32 +916,26 @@ class DFSS_Plugin
 
         // One-key connect (the "wow" path).
         if (isset($_POST['dfss_connect'])) {
-            // The key is base64url ("dfss_<...>") so sanitize_text_field cannot
-            // alter a valid key; decode_key() then re-validates the charset.
+            // The key is base64url ("dfss_<...>") so sanitize_text_field cannot alter a valid key;
+            // decode_key() then re-validates the charset.
             $decoded = $this->decode_key(isset($_POST['dfss_connkey']) ? sanitize_text_field(wp_unslash($_POST['dfss_connkey'])) : '');
             if (null === $decoded) {
                 add_settings_error('dfss', 'badkey', __('That connection key is not valid. Copy it again from your DataFirefly client space.', 'datafirefly-server-side'), 'error');
 
                 return;
             }
-            // Connecting turns on complete tracking + consent gating + all
-            // client destinations by default.
+            // Connecting turns on complete tracking, consent gating and every destination.
             $opts = array_merge($decoded, array(
                 'enabled' => 1,
                 'complete_tracking' => 1,
                 'require_consent' => 1,
-                'dest_meta' => 1,
-                'dest_ga4' => 1,
-                'dest_tiktok' => 1,
-            ));
+            ), DFSS_Settings::defaults());
             update_option(self::OPTION, $opts);
+            $opts = $this->opts();
 
-            // Make sure the retry table + cron exist (covers upgrades where the
-            // activation hook didn't run for this version).
             DFSS_Queue::install();
             DFSS_Queue::schedule_cron();
 
-            // Pull the public destination ids so we can inject the client tags.
             $pub = $this->refresh_public_config($opts);
 
             // Verify the connection with a test event.
@@ -1065,30 +944,24 @@ class DFSS_Plugin
             return;
         }
 
-        // Disconnect — clear the connection.
         if (isset($_POST['dfss_disconnect'])) {
-            update_option(self::OPTION, array(
+            update_option(self::OPTION, array_merge(array(
                 'enabled' => 0, 'tenant_id' => '', 'hmac_secret' => '',
                 'endpoint' => self::DEFAULT_ENDPOINT,
                 'complete_tracking' => 1, 'require_consent' => 1,
-                'dest_meta' => 1, 'dest_ga4' => 1, 'dest_tiktok' => 1,
-            ));
+            ), DFSS_Settings::defaults()));
             delete_option(self::PUBLIC_OPTION);
             add_settings_error('dfss', 'disconnected', __('Disconnected.', 'datafirefly-server-side'), 'updated');
 
             return;
         }
 
-        // Toggle settings (connected view): complete tracking + consent +
-        // per-destination client tags.
+        // Connected view: tracking, consent, destinations and modules.
         if (isset($_POST['dfss_update_toggles'])) {
             $o = $this->opts();
             $o['complete_tracking'] = isset($_POST['dfss_complete_tracking']) ? 1 : 0;
             $o['require_consent'] = isset($_POST['dfss_require_consent']) ? 1 : 0;
-            $o['dest_meta'] = isset($_POST['dfss_dest_meta']) ? 1 : 0;
-            $o['dest_ga4'] = isset($_POST['dfss_dest_ga4']) ? 1 : 0;
-            $o['dest_tiktok'] = isset($_POST['dfss_dest_tiktok']) ? 1 : 0;
-            // Only the fields this form actually shows (DFSS_Settings).
+            $o = DFSS_Settings::apply_destination_fields($o, wp_unslash($_POST));
             $o = DFSS_Settings::apply_consent_fields($o, wp_unslash($_POST));
             update_option(self::OPTION, $o);
             add_settings_error('dfss', 'toggles', __('Tracking settings saved.', 'datafirefly-server-side'), 'updated');
@@ -1109,14 +982,9 @@ class DFSS_Plugin
             return;
         }
 
-        // Manual save (advanced).
+        // Manual save (advanced). The secret is validated, never sanitized (that could alter it), and
+        // an empty field keeps the stored one since the form never echoes it.
         if (isset($_POST['dfss_save'])) {
-            // The secret is validated against the same charset as decode_key()
-            // and stored VERBATIM. It went through sanitize_text_field here,
-            // which the key path forbids for the very reason that it can
-            // silently alter a valid secret into one that signs nothing
-            // (audit 2026-09-04, F3). Empty field = keep the stored secret:
-            // the input never echoes it back, so a save must not wipe it.
             $secret = $this->opts()['hmac_secret'];
             $typed = isset($_POST['dfss_hmac_secret']) ? trim((string) wp_unslash($_POST['dfss_hmac_secret'])) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated against a strict charset just below, never altered.
             if ($typed !== '') {
@@ -1128,10 +996,7 @@ class DFSS_Plugin
                 $secret = $typed;
             }
 
-            // Signed customer events go wherever this points, so it must be a
-            // well-formed HTTPS URL or nothing is saved (audit 2026-09-04, F2).
-            // wp_http_validate_url() also refuses the loopback and private
-            // ranges wp_safe_remote_post() would reject at send time anyway.
+            // Signed events go wherever this points: valid https only (no loopback or private range).
             $endpoint = isset($_POST['dfss_endpoint']) ? esc_url_raw(wp_unslash($_POST['dfss_endpoint'])) : '';
             $scheme = $endpoint !== '' ? wp_parse_url($endpoint, PHP_URL_SCHEME) : '';
             if ($endpoint === '' || strtolower((string) $scheme) !== 'https' || !wp_http_validate_url($endpoint)) {
@@ -1147,10 +1012,8 @@ class DFSS_Plugin
                 'endpoint' => $endpoint,
                 'complete_tracking' => isset($_POST['dfss_complete_tracking']) ? 1 : 0,
                 'require_consent' => isset($_POST['dfss_require_consent']) ? 1 : 0,
-                'dest_meta' => isset($_POST['dfss_dest_meta']) ? 1 : 0,
-                'dest_ga4' => isset($_POST['dfss_dest_ga4']) ? 1 : 0,
-                'dest_tiktok' => isset($_POST['dfss_dest_tiktok']) ? 1 : 0,
             );
+            $opts = DFSS_Settings::apply_destination_fields(array_merge($this->opts(), $opts), wp_unslash($_POST));
             $opts = DFSS_Settings::apply_consent_fields($opts, wp_unslash($_POST));
             update_option(self::OPTION, $opts);
             if (!empty($opts['enabled']) && $opts['tenant_id'] !== '' && $opts['hmac_secret'] !== '') {
@@ -1182,9 +1045,7 @@ class DFSS_Plugin
             'eventTime' => time(),
             'sourceUrl' => home_url('/'),
             'actionSource' => 'website',
-            // Deliberately no 'consent': there is no visitor here, so there is
-            // no consent decision to report. Recorded as 'unknown', which is
-            // exactly what it is.
+            // No 'consent': there is no visitor, so nothing to report.
             'userData' => array('clientUserAgent' => 'DataFirefly-Test'),
         );
 
@@ -1236,14 +1097,10 @@ class DFSS_Plugin
     private function describe_destinations($public)
     {
         $names = array();
-        if (!empty($public['meta']['pixelId'])) {
-            $names[] = 'Meta';
-        }
-        if (!empty($public['ga4']['measurementId'])) {
-            $names[] = 'GA4';
-        }
-        if (!empty($public['tiktok']['pixelCode'])) {
-            $names[] = 'TikTok';
+        foreach (DFSS_Settings::DESTINATIONS as $key => $dest) {
+            if (DFSS_Settings::is_configured($public, $key)) {
+                $names[] = $dest[2];
+            }
         }
 
         return implode(', ', $names);
@@ -1305,30 +1162,7 @@ class DFSS_Plugin
                                 <?php endif; ?>
                             </td>
                         </tr>
-                        <tr>
-                            <th scope="row"><?php esc_html_e('Client destinations', 'datafirefly-server-side'); ?></th>
-                            <td>
-                                <?php
-                                // Which destinations the dispatcher has configured
-                                // (unfiltered — shows availability, not the toggle).
-                                $dfss_dests = array(
-                                    'dest_meta' => array('Meta (Facebook pixel)', !empty($public['meta']['pixelId'])),
-                                    'dest_ga4' => array('Google Analytics 4 (gtag.js)', !empty($public['ga4']['measurementId'])),
-                                    'dest_tiktok' => array('TikTok pixel', !empty($public['tiktok']['pixelCode'])),
-                                );
-                                foreach ($dfss_dests as $dfss_key => $dfss_info) :
-                                    ?>
-                                    <label style="display:block;margin-bottom:6px;">
-                                        <input type="checkbox" name="dfss_<?php echo esc_attr($dfss_key); ?>" value="1" <?php checked(1, (int) $o[$dfss_key]); ?> />
-                                        <?php echo esc_html($dfss_info[0]); ?>
-                                        <?php if (!$dfss_info[1]) : ?>
-                                            <em class="description">(<?php esc_html_e('not configured on your DataFirefly account', 'datafirefly-server-side'); ?>)</em>
-                                        <?php endif; ?>
-                                    </label>
-                                <?php endforeach; ?>
-                                <p class="description"><?php esc_html_e('Uncheck a destination you do not use: its third-party script (and its cookies) will never be loaded in your visitors\' browsers. Server-side destinations are managed in your DataFirefly client space.', 'datafirefly-server-side'); ?></p>
-                            </td>
-                        </tr>
+                        <?php $this->render_destination_fields($o, $public); ?>
                         <?php $this->render_consent_fields($o); ?>
                     </table>
                     <p><button type="submit" name="dfss_update_toggles" class="button button-primary"><?php esc_html_e('Save settings', 'datafirefly-server-side'); ?></button></p>
@@ -1369,7 +1203,7 @@ class DFSS_Plugin
                 </div>
 
                 <p style="margin-top:18px;">
-                    <a href="#" data-dfss-toggle-advanced onclick="document.getElementById('dfss-adv').style.display='block';this.style.display='none';return false;"><?php esc_html_e('Advanced: enter credentials manually', 'datafirefly-server-side'); ?></a>
+                    <a href="#" data-dfss-toggle-advanced><?php esc_html_e('Advanced: enter credentials manually', 'datafirefly-server-side'); ?></a>
                 </p>
                 <div id="dfss-adv" style="display:none;max-width:620px;">
                     <form method="post" action="">
@@ -1387,12 +1221,7 @@ class DFSS_Plugin
                                 <td><label><input type="checkbox" name="dfss_complete_tracking" value="1" <?php checked(1, (int) $o['complete_tracking']); ?> /> <?php esc_html_e('Client + full funnel', 'datafirefly-server-side'); ?></label></td></tr>
                             <tr><th scope="row"><?php esc_html_e('Require consent', 'datafirefly-server-side'); ?></th>
                                 <td><label><input type="checkbox" name="dfss_require_consent" value="1" <?php checked(1, (int) $o['require_consent']); ?> /> <?php esc_html_e('Gate on marketing consent', 'datafirefly-server-side'); ?></label></td></tr>
-                            <tr><th scope="row"><?php esc_html_e('Client destinations', 'datafirefly-server-side'); ?></th>
-                                <td>
-                                    <label style="display:block;"><input type="checkbox" name="dfss_dest_meta" value="1" <?php checked(1, (int) $o['dest_meta']); ?> /> Meta</label>
-                                    <label style="display:block;"><input type="checkbox" name="dfss_dest_ga4" value="1" <?php checked(1, (int) $o['dest_ga4']); ?> /> GA4</label>
-                                    <label style="display:block;"><input type="checkbox" name="dfss_dest_tiktok" value="1" <?php checked(1, (int) $o['dest_tiktok']); ?> /> TikTok</label>
-                                </td></tr>
+                            <?php $this->render_destination_fields($o, $public); ?>
                             <?php $this->render_consent_fields($o); ?>
                         </table>
                         <p><button type="submit" name="dfss_save" class="button"><?php esc_html_e('Save', 'datafirefly-server-side'); ?></button></p>
@@ -1404,10 +1233,39 @@ class DFSS_Plugin
     }
 
     /**
-     * The five consent settings, shown in both the connected and the manual
-     * form. The hidden dfss_has_consent_fields tells the save handler that
-     * this form carries them (DFSS_Settings::apply_consent_fields): a form
-     * without it never resets them.
+     * Browser destinations and optional modules, shown in both forms. The hidden field tells the
+     * save handler this form carries them (DFSS_Settings::apply_destination_fields).
+     *
+     * @param array $o      Saved options.
+     * @param array $public Unfiltered public ids: shows availability, not the toggle.
+     */
+    private function render_destination_fields(array $o, array $public)
+    {
+        ?>
+                            <tr><th scope="row"><?php esc_html_e('Browser tags', 'datafirefly-server-side'); ?></th>
+                                <td>
+                                    <input type="hidden" name="dfss_has_destination_fields" value="1" />
+                                    <?php foreach (DFSS_Settings::DESTINATIONS as $dfss_key => $dfss_dest) : ?>
+                                        <label style="display:block;margin-bottom:6px;">
+                                            <input type="checkbox" name="dfss_<?php echo esc_attr($dfss_key); ?>" value="1" <?php checked(1, (int) $o[$dfss_key]); ?> />
+                                            <?php echo esc_html($dfss_dest[2]); ?>
+                                            <?php if (!DFSS_Settings::is_configured($public, $dfss_key)) : ?>
+                                                <em class="description">(<?php esc_html_e('not configured on your DataFirefly account', 'datafirefly-server-side'); ?>)</em>
+                                            <?php endif; ?>
+                                        </label>
+                                    <?php endforeach; ?>
+                                    <p class="description"><?php esc_html_e('Uncheck a platform you do not use: its code is not sent to the browser at all, and its third-party script and cookies never load. Server-side delivery is managed in your DataFirefly client space and is not affected.', 'datafirefly-server-side'); ?></p>
+                                </td></tr>
+                            <tr><th scope="row"><?php esc_html_e('Lead and engagement events', 'datafirefly-server-side'); ?></th>
+                                <td>
+                                    <label><input type="checkbox" name="dfss_mod_engagement" value="1" <?php checked(1, (int) $o['mod_engagement']); ?> /> <?php esc_html_e('Enabled', 'datafirefly-server-side'); ?></label>
+                                    <p class="description"><?php esc_html_e('Detects clicks on email and phone links, booking links (Calendly...), social shares, free-trial links, newsletter sign-ups, job applications and tagged donate / store-locator buttons. Useful for content and service sites. A shop that does not need them can switch them off: the script is then not loaded. Lead forms, registration and the purchase funnel are not affected.', 'datafirefly-server-side'); ?></p>
+                                </td></tr>
+        <?php
+    }
+
+    /**
+     * The five consent settings, shown in both the connected and the manual form.
      *
      * @param array $o Saved options.
      */
@@ -1449,7 +1307,7 @@ class DFSS_Plugin
         <?php
     }
 
-    // ---- Activity panel -----------------------------------------------------
+    // ---- Activity panel ----------------------------------------------------
 
     public function render_activity()
     {
@@ -1515,8 +1373,7 @@ class DFSS_Plugin
     }
 
     /**
-     * Render the activity table rows. Every value is escaped here, so callers
-     * can echo the result directly.
+     * Render the activity table rows.
      *
      * @return string
      */
@@ -1558,7 +1415,7 @@ class DFSS_Plugin
             $html .= '<td>' . esc_html($time) . '</td>';
             $html .= '<td><code>' . esc_html($r->event_name) . '</code></td>';
             $html .= '<td>' . esc_html($r->origin === 'beacon' ? __('client beacon', 'datafirefly-server-side') : __('server', 'datafirefly-server-side')) . '</td>';
-            // Underline + bold in addition to colour (accessibility — never colour alone).
+            // Underline + bold in addition to colour (accessibility, never colour alone).
             $html .= '<td><strong style="color:' . esc_attr($color) . ';text-decoration:underline;">' . esc_html($label) . '</strong></td>';
             $html .= '<td>' . esc_html($detail) . '</td>';
             $html .= '</tr>';
