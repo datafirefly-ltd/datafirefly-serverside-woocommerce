@@ -782,7 +782,7 @@ class DFSS_Plugin
                     'products' => $products,
                     // Verdict stored at checkout. In Consent Mode advanced the tracker sends the purchase
                     // to GA4 itself only when the server did not.
-                    'consent' => (string) $order->get_meta('_dfss_consent'),
+                    'consent' => DFSS_Consent::page_purchase_verdict($this->opts(), $order->get_meta('_dfss_consent')),
                 );
             }
         }

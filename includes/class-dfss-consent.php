@@ -22,6 +22,30 @@ class DFSS_Consent
     }
 
     /**
+     * The verdict the confirmation page hands to the tracker for a purchase.
+     *
+     * Asks "is consent required?" first, exactly as the server does when it sends the purchase
+     * (DFSS_Event_Builder::purchase_consent). Reading the verdict stored on the order directly made an old
+     * order stored as 'denied', on a shop that has since switched gating off, go to GA4 twice: once by
+     * the server (not required) and once by the browser (denied). An empty verdict leaves the purchase to
+     * the server, which never counts it twice.
+     *
+     * @param array $opts   Plugin options.
+     * @param mixed $stored The verdict stored on the order (_dfss_consent).
+     *
+     * @return string 'granted'|'denied'|'not_required'|'' (unknown)
+     */
+    public static function page_purchase_verdict($opts, $stored)
+    {
+        if (!self::is_required(is_array($opts) ? $opts : array())) {
+            return 'not_required';
+        }
+        $stored = is_string($stored) ? $stored : '';
+
+        return ($stored === 'granted' || $stored === 'denied') ? $stored : '';
+    }
+
+    /**
      * Server-side consent decision for an incoming beacon.
      *
      * @param array $opts Plugin options.
