@@ -20,7 +20,8 @@ function get_transient($k) { return $GLOBALS['transients'][$k] ?? false; }
 function set_transient($k, $v, $t = 0) { $GLOBALS['transients'][$k] = $v; return true; }
 function wp_json_encode($v, $f = 0) { return json_encode($v, $f); }
 function wp_parse_url($u) { return parse_url($u); }
-function is_wp_error($r) { return false; }
+class WP_Error { function get_error_message() { return 'timeout'; } }
+function is_wp_error($r) { return $r instanceof WP_Error; }
 function wp_remote_retrieve_response_code($r) { return $r['code']; }
 function wp_remote_retrieve_body($r) { return $r['body']; }
 $GLOBALS['posted'] = array();
@@ -32,6 +33,10 @@ function wp_safe_remote_post($url, $args)
     $GLOBALS['posted'][] = $args;
     $GLOBALS['posted_urls'][] = $url;
     $GLOBALS['hooks_at_post'][] = count($GLOBALS['hooks']['http_api_curl'] ?? array());
+
+    if (isset($GLOBALS['answer'])) {
+        return $GLOBALS['answer'] === 0 ? new WP_Error() : array('code' => $GLOBALS['answer'], 'body' => 'nope');
+    }
 
     return array('code' => 200, 'body' => '{}');
 }
@@ -160,6 +165,12 @@ class FakeClient extends DFSS_Client
     public $codes;
     public $delay_us = 0;
     public $on_send = null;
+    public $heartbeats = array();
+
+    public function heartbeat()
+    {
+        $this->heartbeats[] = DFSS_Queue::signal();
+    }
 
     public function __construct($codes = array()) { $this->codes = $codes; }
 
@@ -439,6 +450,73 @@ t('the REST relay passes its own timeout, 8 s', strpos($rest, "const RELAY_TIMEO
 t('no order or checkout hook passes a timeout', preg_match('/->send\(\$payload, /', $main) === 0);
 $unin = file_get_contents(__DIR__ . '/../uninstall.php');
 t('uninstall removes the last-run option and the schema transient', strpos($unin, "'dfss_queue_last_run'") !== false && strpos($unin, "delete_transient('dfss_queue_schema_notice')") !== false);
+
+// ---- 14. heartbeat after a run that changed the queue
+fresh();
+queue('page_view', 'hb1', $now - 5);
+queue('page_view', 'hb2', $now - 6);
+DFSS_Queue::signal(); // cached before the run, as on a request that also relays an event
+$c = new FakeClient();
+run($c);
+t('one heartbeat after a draining run, with a fresh signal (depth 0, age 0)', count($c->heartbeats) === 1 && $c->heartbeats[0] === array('depth' => 0, 'oldest_age' => 0));
+fresh();
+$c = new FakeClient();
+run($c);
+t('no heartbeat when the run did nothing', $c->heartbeats === array());
+fresh();
+queue('page_view', 'later', $now);
+$wpdb->query("UPDATE wp_dfss_queue SET next_attempt = " . ($now + 3600));
+$c = new FakeClient();
+run($c);
+t('no heartbeat when nothing was due', $c->heartbeats === array());
+fresh();
+queue('page_view', 'old', $now - 9 * 86400);
+$c = new FakeClient();
+run($c);
+t('a run that only expired rows sends one heartbeat', count($c->heartbeats) === 1);
+fresh();
+queue('page_view', 'f1', $now - 1);
+queue('page_view', 'f2', $now - 2);
+$c = new FakeClient(array('f1' => 503));
+run($c);
+t('a run that rescheduled a row sends one heartbeat with the remaining depth', count($c->heartbeats) === 1 && $c->heartbeats[0]['depth'] === 2);
+
+// the real client: URL, signature, headers, silence
+$GLOBALS['posted'] = array();
+$GLOBALS['posted_urls'] = array();
+fresh();
+queue('page_view', 'k1', $now - 100);
+$real = new DFSS_Client('t', 's', 'https://d.example/v1/events');
+$real->heartbeat();
+t('the heartbeat goes to /v1/heartbeat on the events host', end($GLOBALS['posted_urls']) === 'https://d.example/v1/heartbeat');
+$a = end($GLOBALS['posted']);
+t('empty JSON body, signed like an event, 4 s timeout', $a['body'] === '{}' && $a['timeout'] === 4 && $a['headers']['X-Dfss-Signature'] === hash_hmac('sha256', $a['headers']['X-Dfss-Timestamp'] . "\n{}", 's') && $a['headers']['X-Dfss-Signature-Version'] === '2');
+t('with the queue headers', $a['headers']['X-Dfss-Queue-Depth'] === '1' && abs((int) $a['headers']['X-Dfss-Queue-Oldest-Age'] - 100) <= 2);
+$real2 = new DFSS_Client('t', 's', 'https://d.example:8443/other/path');
+$real2->heartbeat();
+t('URL derived from scheme, host and port when the endpoint is not /v1/events', end($GLOBALS['posted_urls']) === 'https://d.example:8443/v1/heartbeat');
+$n = count($GLOBALS['posted']);
+(new DFSS_Client('', 's', 'https://d.example/v1/events'))->heartbeat();
+t('a client that is not configured sends nothing', count($GLOBALS['posted']) === $n);
+// 404 and failures are ignored: no exception, no queue row, no log
+$rows = count($wpdb->rows());
+file_put_contents($log = tempnam(sys_get_temp_dir(), 'dfss'), '');
+ini_set('error_log', $log);
+$GLOBALS['answer'] = 404;
+$ret = $real->heartbeat();
+$GLOBALS['answer'] = 0;
+$ret2 = $real->heartbeat();
+unset($GLOBALS['answer']);
+t('a 404 or a network failure is ignored: nothing returned, queued or logged', $ret === null && $ret2 === null && count($wpdb->rows()) === $rows && trim((string) file_get_contents($log)) === '');
+unlink($log);
+// age unknown
+fresh();
+$wpdb->query("INSERT INTO wp_dfss_queue (event_name, event_id, payload, status, created_at, event_time) VALUES ('page_view','u1','{}','pending',1000,0)");
+DFSS_Queue::reset_signal();
+$GLOBALS['posted'] = array();
+$real->heartbeat();
+$h = end($GLOBALS['posted'])['headers'];
+t('depth > 0 with no known event time: the age header is omitted, not 0', $h['X-Dfss-Queue-Depth'] === '1' && !isset($h['X-Dfss-Queue-Oldest-Age']));
 
 echo "\n$ok passed, $fail failed\n";
 exit($fail ? 1 : 0);

@@ -24,7 +24,7 @@ if (!defined('ABSPATH')) {
 class DFSS_Queue
 {
     /**
-     * @var array{depth:int,oldest_age:int}|false|null Per-request cache of signal().
+     * @var array{depth:int,oldest_age:int|null}|false|null Per-request cache of signal().
      */
     private static $signal_cache = null;
 
@@ -267,15 +267,15 @@ class DFSS_Queue
         $stats['expired'] = self::expire_old($now);
 
         $rows = self::select_due($now, $batch);
+        if ($client === null) {
+            $client = new DFSS_Client($tenant_id, $hmac_secret, $endpoint);
+        }
         if (empty($rows)) {
             self::trim();
             self::remember_run($now, $stats);
+            self::report($client, $stats);
 
             return $stats;
-        }
-
-        if ($client === null) {
-            $client = new DFSS_Client($tenant_id, $hmac_secret, $endpoint);
         }
 
         foreach ($rows as $row) {
@@ -353,8 +353,28 @@ class DFSS_Queue
 
         self::trim();
         self::remember_run($now, $stats);
+        self::report($client, $stats);
 
         return $stats;
+    }
+
+    /**
+     * After a run that changed the queue (sent, expired or dropped a row), send the dispatcher one
+     * heartbeat with fresh queue-health headers. The per-request signal was computed before the
+     * run drained the queue, so it is forgotten first. A run that did nothing sends nothing.
+     *
+     * @param DFSS_Client $client
+     * @param array       $stats
+     *
+     * @return void
+     */
+    private static function report($client, array $stats)
+    {
+        if ($stats['sent'] + $stats['expired'] + $stats['dropped'] === 0) {
+            return;
+        }
+        self::reset_signal();
+        $client->heartbeat();
     }
 
     /**
@@ -379,7 +399,7 @@ class DFSS_Queue
      * One aggregate query, at most once per request: a figure a few events off is fine, a query per
      * send is not. Null when the queue cannot be read (an unknown queue is not an empty one).
      *
-     * @return array{depth:int,oldest_age:int}|null
+     * @return array{depth:int,oldest_age:int|null}|null
      */
     public static function signal()
     {
@@ -408,7 +428,8 @@ class DFSS_Queue
         $oldest = (int) $row->oldest;
         self::$signal_cache = array(
             'depth' => $depth,
-            'oldest_age' => ($depth > 0 && $oldest > 0) ? max(0, time() - $oldest) : 0,
+            // 0 for an empty queue; null (header left out) when rows wait but none has an event time.
+            'oldest_age' => $depth === 0 ? 0 : ($oldest > 0 ? max(0, time() - $oldest) : null),
         );
 
         return self::$signal_cache;

@@ -114,6 +114,27 @@ class DFSS_Client
     }
 
     /**
+     * Tell the dispatcher the queue's state after a replay that changed it: an empty POST to
+     * /v1/heartbeat, signed like an event, carrying the queue-health headers. Without it the
+     * dispatcher's last report is the one from the last event, which a quiet shop may not send for
+     * hours. Fire and forget: 4 s, never queued, never retried, any failure (a dispatcher that does
+     * not know the route answers 404) ignored silently.
+     *
+     * @return void
+     */
+    public function heartbeat()
+    {
+        if ($this->tenant_id === '' || $this->secret === '' || $this->endpoint === '') {
+            return;
+        }
+        $url = $this->sibling_url('/v1/heartbeat');
+        if ($url === '') {
+            return;
+        }
+        $this->request($url, '{}', 4);
+    }
+
+    /**
      * A path on the same host as the events endpoint.
      */
     private function sibling_url($path)
@@ -188,7 +209,10 @@ class DFSS_Client
             $signal = DFSS_Queue::signal();
             if ($signal !== null) {
                 $headers['X-Dfss-Queue-Depth'] = (string) (int) $signal['depth'];
-                $headers['X-Dfss-Queue-Oldest-Age'] = (string) (int) $signal['oldest_age'];
+                // Unknown age (rows without an event time) is left out: 0 would say "nothing old".
+                if ($signal['oldest_age'] !== null) {
+                    $headers['X-Dfss-Queue-Oldest-Age'] = (string) (int) $signal['oldest_age'];
+                }
             }
         }
 
