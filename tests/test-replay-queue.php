@@ -17,7 +17,8 @@ $GLOBALS['transients'] = array();
 function get_option($k, $d = false) { return array_key_exists($k, $GLOBALS['options']) ? $GLOBALS['options'][$k] : $d; }
 function update_option($k, $v, $a = null) { $GLOBALS['options'][$k] = $v; return true; }
 function get_transient($k) { return $GLOBALS['transients'][$k] ?? false; }
-function set_transient($k, $v, $t = 0) { $GLOBALS['transients'][$k] = $v; return true; }
+function set_transient($k, $v, $t = 0) { $GLOBALS['transients'][$k] = $v; $GLOBALS['transient_ttl'][$k] = $t; return true; }
+function delete_transient($k) { unset($GLOBALS['transients'][$k]); return true; }
 function wp_json_encode($v, $f = 0) { return json_encode($v, $f); }
 function wp_parse_url($u) { return parse_url($u); }
 class WP_Error { function get_error_message() { return 'timeout'; } }
@@ -467,7 +468,7 @@ $client->send(array('eventName' => 'page_view', 'eventId' => 'b1'));
 t('sends keep their 4 s timeout and touch no connect setting', $GLOBALS['posted'][0]['timeout'] === 4 && $GLOBALS['posted'][1]['timeout'] === 4 && empty($GLOBALS['hooks']['http_api_curl']));
 $rest = file_get_contents(__DIR__ . '/../includes/class-dfss-rest.php');
 $main = file_get_contents(__DIR__ . '/../datafirefly-server-side.php');
-t('the beacon relay and the order hooks pass no longer timeout', strpos($rest, 'RELAY_TIMEOUT') === false && strpos($rest, '->send($payload)') !== false && preg_match('/->send\(\$payload, /', $main) === 0);
+t('the beacon relay and the order hooks pass no longer timeout', strpos($rest, 'RELAY_TIMEOUT') === false && preg_match('/->send\(\$payload, /', $main) === 0);
 $unin = file_get_contents(__DIR__ . '/../uninstall.php');
 t('uninstall removes the last-run option and the schema transient', strpos($unin, "'dfss_queue_last_run'") !== false && strpos($unin, "delete_transient('dfss_queue_schema_notice')") !== false);
 
@@ -589,6 +590,48 @@ queue('purchase', 'n1', $now - 1);
 $c = new FakeClient(array('n1' => 0));
 run($c);
 t('expiring rows then stopping on code 0 still sends no heartbeat (it would only wait 4 s)', $c->heartbeats === array());
+
+// ---- 17. circuit breaker on direct sends
+foreach (array(0, 429, 500, 503) as $code) {
+    fresh();
+    $c = new FakeClient(array('o1' => $code));
+    $r = DFSS_Queue::send_direct($c, array('eventName' => 'purchase', 'eventId' => 'o1'));
+    t("an outage result ($code) on a direct send opens the breaker for 60 s", !empty($GLOBALS['transients']['dfss_direct_skip']) && $GLOBALS['transient_ttl']['dfss_direct_skip'] === 60 && $r['code'] === $code);
+}
+fresh();
+$c = new FakeClient(array('o1' => 422));
+DFSS_Queue::send_direct($c, array('eventName' => 'purchase', 'eventId' => 'o1'));
+$c2 = new FakeClient();
+DFSS_Queue::send_direct($c2, array('eventName' => 'purchase', 'eventId' => 'o2'));
+t('a 4xx or a success leaves the breaker closed', empty($GLOBALS['transients']['dfss_direct_skip']));
+fresh();
+$GLOBALS['transients']['dfss_direct_skip'] = 1;
+$c = new FakeClient();
+$payload = array('eventName' => 'page_view', 'eventId' => 'beacon1');
+$r = DFSS_Queue::send_direct($c, $payload);
+DFSS_Queue::record_attempt($payload, $r, 'beacon');
+t('with the breaker open the next beacon makes no network call', $c->sent === array());
+$row = $wpdb->rows("event_id = 'beacon1'")[0];
+t('and is queued at once as pending, due now, no attempt spent', $row['status'] === 'pending' && (int) $row['next_attempt'] <= time() && (int) $row['attempts'] === 0 && $row['payload'] !== '{}');
+$pp = array('eventName' => 'purchase', 'eventId' => 'order9');
+$r = DFSS_Queue::send_direct($c, $pp);
+DFSS_Queue::record_attempt($pp, $r, 'server');
+t('an order or refund hook never waits while the breaker is open', $c->sent === array() && count($wpdb->rows("event_id = 'order9' AND status = 'pending'")) === 1);
+// the replay ignores the breaker and a delivery clears it
+$c = new FakeClient();
+run($c);
+t('the replay is the probe: it sends despite the breaker, purchase first', $c->sent === array('order9', 'beacon1'));
+t('a successful replay clears the breaker', empty($GLOBALS['transients']['dfss_direct_skip']));
+fresh();
+queue('purchase', 'p', $now - 1);
+$c = new FakeClient(array('p' => 503));
+run($c);
+t('a replay that meets an outage keeps direct sends away', !empty($GLOBALS['transients']['dfss_direct_skip']));
+// call sites
+$rest = file_get_contents(__DIR__ . '/../includes/class-dfss-rest.php');
+$main = file_get_contents(__DIR__ . '/../datafirefly-server-side.php');
+t('the beacon relay and the three order hooks go through the breaker', strpos($rest, 'DFSS_Queue::send_direct(') !== false && substr_count($main, 'DFSS_Queue::send_direct($client, $payload)') === 3);
+t('the connection test still really sends', substr_count($main, '$result = $client->send($payload);') === 1);
 
 echo "\n$ok passed, $fail failed\n";
 exit($fail ? 1 : 0);

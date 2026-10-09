@@ -404,7 +404,7 @@ class DFSS_Plugin
             $order->save();
 
             $client = new DFSS_Client($opts['tenant_id'], $opts['hmac_secret'], $opts['endpoint']);
-            $result = $client->send($payload);
+            $result = DFSS_Queue::send_direct($client, $payload);
 
             // Record for observability + queue retry on a retryable failure.
             DFSS_Queue::record_attempt($payload, $result, 'server');
@@ -449,7 +449,7 @@ class DFSS_Plugin
             }
 
             $client = new DFSS_Client($opts['tenant_id'], $opts['hmac_secret'], $opts['endpoint']);
-            $result = $client->send($payload);
+            $result = DFSS_Queue::send_direct($client, $payload);
             DFSS_Queue::record_attempt($payload, $result, 'server');
         } catch (\Throwable $e) {
             // A sign-in must never fail because our measurement did.
@@ -481,7 +481,7 @@ class DFSS_Plugin
             }
 
             $client = new DFSS_Client($opts['tenant_id'], $opts['hmac_secret'], $opts['endpoint']);
-            $result = $client->send($payload);
+            $result = DFSS_Queue::send_direct($client, $payload);
             DFSS_Queue::record_attempt($payload, $result, 'server');
 
             if (empty($result['ok'])) {

@@ -54,6 +54,10 @@ class DFSS_Queue
     const LAST_RUN_OPTION = 'dfss_queue_last_run';
     // Transient: a schema problem was reported or repaired less than an hour ago.
     const SCHEMA_NOTICE_TRANSIENT = 'dfss_queue_schema_notice';
+    // Transient: direct sends (storefront beacon relay, order and refund hooks) are skipped while it
+    // lives. Set after an outage result (no answer, 429, 5xx), cleared by a replay that delivers.
+    const BREAKER_TRANSIENT = 'dfss_direct_skip';
+    const BREAKER_SECONDS = 60;
     // Transient: a lost event was reported less than an hour ago. Its own key, so that reporting
     // a lost event never keeps the migration from being attempted.
     const INSERT_NOTICE_TRANSIENT = 'dfss_queue_insert_notice';
@@ -172,6 +176,31 @@ class DFSS_Queue
     }
 
     /**
+     * Send one event straight away, unless the dispatcher was out a moment ago. A hung dispatcher
+     * must never hold PHP workers on storefront or checkout requests: after an outage result the
+     * breaker stays open for BREAKER_SECONDS, and during that time the event is not sent but
+     * reported as "skipped", which record_attempt() queues as pending and due now. The replay is
+     * the probe: it ignores the breaker, and a delivery clears it.
+     *
+     * @param DFSS_Client $client
+     * @param array       $payload
+     *
+     * @return array{ok:bool,code:int,message:string,skipped?:bool}
+     */
+    public static function send_direct($client, array $payload)
+    {
+        if (get_transient(self::BREAKER_TRANSIENT)) {
+            return array('ok' => false, 'code' => 0, 'message' => 'circuit_open', 'skipped' => true);
+        }
+        $result = $client->send($payload);
+        if (empty($result['ok']) && self::stops_run(isset($result['code']) ? (int) $result['code'] : 0)) {
+            set_transient(self::BREAKER_TRANSIENT, 1, self::BREAKER_SECONDS);
+        }
+
+        return $result;
+    }
+
+    /**
      * Record a send attempt: 'done' on success, 'pending' with backoff if retryable, 'failed' on 401/403.
      *
      * @param array  $payload The IncomingEvent that was (attempted to be) sent.
@@ -202,6 +231,14 @@ class DFSS_Queue
                 self::clip($result),
                 $origin
             );
+            self::maybe_trim();
+
+            return;
+        }
+
+        // Skipped by the breaker: never sent, so no attempt is spent and the replay may take it now.
+        if (!empty($result['skipped'])) {
+            self::insert_row($payload, self::STATUS_PENDING, 0, time(), 0, 'circuit_open', $origin);
             self::maybe_trim();
 
             return;
@@ -326,6 +363,7 @@ class DFSS_Queue
             if (!empty($result['ok'])) {
                 self::update_status((int) $row->id, self::STATUS_DONE, $attempts, 0, $code, '');
                 ++$stats['delivered'];
+                delete_transient(self::BREAKER_TRANSIENT);
                 continue;
             }
 
@@ -355,6 +393,7 @@ class DFSS_Queue
             if (self::stops_run($code)) {
                 $stats['stopped'] = 'dispatcher';
                 $stats['network'] = $code === 0;
+                set_transient(self::BREAKER_TRANSIENT, 1, self::BREAKER_SECONDS);
                 break;
             }
         }

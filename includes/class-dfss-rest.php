@@ -225,7 +225,7 @@ class DFSS_REST
             return 'unmappable';
         }
 
-        $result = $context['client']->send($payload);
+        $result = DFSS_Queue::send_direct($context['client'], $payload);
         DFSS_Queue::record_attempt($payload, $result, 'beacon');
 
         return !empty($result['ok']) ? true : false;
