@@ -41,15 +41,19 @@ class DFSS_Queue
     // replaying it only delays the ones that still count.
     const EXPIRY_DAYS = 7;
     // Rows replayed at most per cron run, and the wall-clock budget (seconds) after which a run
-    // starts no new send. A send can last its own timeout (4 s) past the budget.
+    // starts no new send. A send can last its own timeout (4 s) past the budget, and the heartbeat
+    // 4 s more: the worst case stays near 20 s, under the usual max_execution_time of 30 s.
     const REPLAY_BATCH = 200;
-    const REPLAY_BUDGET_SECONDS = 20;
+    const REPLAY_BUDGET_SECONDS = 12;
     // Events replayed before everything else.
     const PRIORITY_EVENTS = array('purchase', 'refund');
     // Option: when the last replay ran (Activity panel diagnostics).
     const LAST_RUN_OPTION = 'dfss_queue_last_run';
     // Transient: a schema problem was reported or repaired less than an hour ago.
     const SCHEMA_NOTICE_TRANSIENT = 'dfss_queue_schema_notice';
+    // Transient: a lost event was reported less than an hour ago. Its own key, so that reporting
+    // a lost event never keeps the migration from being attempted.
+    const INSERT_NOTICE_TRANSIENT = 'dfss_queue_insert_notice';
 
     // Status values stored in the `status` column.
     const STATUS_PENDING = 'pending'; // queued, awaiting a retry
@@ -223,13 +227,13 @@ class DFSS_Queue
      * @param float|null      $budget   Seconds after which no new send starts (default REPLAY_BUDGET_SECONDS).
      * @param int|null        $batch    Rows at most (default REPLAY_BATCH).
      *
-     * @return array{expired:int,sent:int,delivered:int,retry:int,failed:int,dropped:int,stopped:string}
+     * @return array{expired:int,sent:int,delivered:int,retry:int,failed:int,dropped:int,stopped:string,network:bool}
      */
     public static function process_due($tenant_id, $hmac_secret, $endpoint, $client = null, $budget = null, $batch = null)
     {
         global $wpdb;
 
-        $stats = array('expired' => 0, 'sent' => 0, 'delivered' => 0, 'retry' => 0, 'failed' => 0, 'dropped' => 0, 'stopped' => '');
+        $stats = array('expired' => 0, 'sent' => 0, 'delivered' => 0, 'retry' => 0, 'failed' => 0, 'dropped' => 0, 'stopped' => '', 'network' => false);
 
         if ($tenant_id === '' || $hmac_secret === '' || $endpoint === '') {
             return $stats; // not connected: leave the queue intact
@@ -347,6 +351,7 @@ class DFSS_Queue
             // The dispatcher or the network is struggling: the next row would fail the same way.
             if (self::stops_run($code)) {
                 $stats['stopped'] = 'dispatcher';
+                $stats['network'] = $code === 0;
                 break;
             }
         }
@@ -371,6 +376,11 @@ class DFSS_Queue
     private static function report($client, array $stats)
     {
         if ($stats['sent'] + $stats['expired'] + $stats['dropped'] === 0) {
+            return;
+        }
+        // The run stopped because the dispatcher did not answer at all: a heartbeat would wait the
+        // same 4 s for nothing, and push the run toward max_execution_time.
+        if (!empty($stats['network'])) {
             return;
         }
         self::reset_signal();
@@ -556,15 +566,16 @@ class DFSS_Queue
      * every storefront event and every five minutes, a log line each time would flood it.
      *
      * @param string $message
+     * @param string $key     Transient that throttles this kind of line.
      *
      * @return void
      */
-    private static function log_once($message)
+    private static function log_once($message, $key = self::SCHEMA_NOTICE_TRANSIENT)
     {
-        if (get_transient(self::SCHEMA_NOTICE_TRANSIENT)) {
+        if (get_transient($key)) {
             return;
         }
-        set_transient(self::SCHEMA_NOTICE_TRANSIENT, 1, HOUR_IN_SECONDS);
+        set_transient($key, 1, HOUR_IN_SECONDS);
         error_log('[DataFirefly SS] ' . $message); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- one line an hour, the only trace of a queue that does not work.
     }
 
@@ -717,15 +728,20 @@ class DFSS_Queue
         $suppress = $wpdb->suppress_errors(true);
         $ok = $wpdb->insert(self::table(), $row, $format); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- state write to the plugin's own retry-queue table; caching does not apply.
         if ($ok === false) {
-            // The table may still have the pre-2.30.0 shape (files updated, migration not run
-            // yet). A failed send must never be lost for a missing column: write it without the
-            // two new ones. The migration dates it from its creation.
+            // The table may be missing or still in the pre-2.30.0 shape (files updated, migration
+            // not run yet). Try the migration (once an hour), then write again.
+            self::schema_behind();
+            $ok = $wpdb->insert(self::table(), $row, $format); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- same write, after the migration was attempted.
+        }
+        if ($ok === false) {
+            // A failed send must never be lost for a missing column: write it without the two new
+            // ones. The migration dates it from its creation.
             unset($row['priority'], $row['event_time']);
             array_splice($format, 2, 2);
             $ok = $wpdb->insert(self::table(), $row, $format); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- same table, same write, without the two newer columns.
             if ($ok === false) {
                 // The event is lost: say so, at most once an hour.
-                self::log_once('retry queue insert failed, event not queued: ' . substr((string) $wpdb->last_error, 0, 200));
+                self::log_once('retry queue insert failed, event not queued: ' . substr((string) $wpdb->last_error, 0, 200), self::INSERT_NOTICE_TRANSIENT);
             }
         }
         $wpdb->suppress_errors($suppress);

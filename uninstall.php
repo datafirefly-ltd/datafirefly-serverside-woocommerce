@@ -15,6 +15,7 @@ foreach (array('dfss_settings', 'dfss_public_config', 'dfss_version', 'dfss_trut
 }
 
 delete_transient('dfss_queue_schema_notice');
+delete_transient('dfss_queue_insert_notice');
 
 // Cron hooks (DFSS_Queue::CRON_HOOK, DFSS_Truth::CRON_HOOK).
 wp_clear_scheduled_hook('dfss_retry');

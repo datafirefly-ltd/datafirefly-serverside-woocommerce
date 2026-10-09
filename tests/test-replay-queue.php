@@ -50,6 +50,7 @@ class FakeWpdb
     private $pdo;
     private $old = false;
     public $can_migrate = true;
+    public $missing = false;
 
     public function __construct()
     {
@@ -68,6 +69,10 @@ class FakeWpdb
 
     public function migrate()
     {
+        if ($this->can_migrate && $this->missing) {
+            $this->create(false);
+            $this->missing = false;
+        }
         if ($this->old && $this->can_migrate) {
             $this->pdo->exec('ALTER TABLE wp_dfss_queue ADD COLUMN priority INTEGER NOT NULL DEFAULT 0');
             $this->pdo->exec('ALTER TABLE wp_dfss_queue ADD COLUMN event_time INTEGER NOT NULL DEFAULT 0');
@@ -290,7 +295,7 @@ for ($i = 0; $i < 5; $i++) { queue('page_view', "e$i", $now - $i); }
 $c = new FakeClient();
 run($c, null, 3);
 t('a run sends at most the batch cap', count($c->sent) === 3);
-t('the default cap is 200 rows and 20 seconds', DFSS_Queue::REPLAY_BATCH === 200 && DFSS_Queue::REPLAY_BUDGET_SECONDS === 20);
+t('the default cap is 200 rows and 12 seconds', DFSS_Queue::REPLAY_BATCH === 200 && DFSS_Queue::REPLAY_BUDGET_SECONDS === 12);
 
 // ---- 5. stop rules
 foreach (array(0 => 'network failure', 500 => '5xx', 503 => '503', 429 => 'rate limit') as $code => $label) {
@@ -376,8 +381,8 @@ t('the migration was attempted and the rows are now dated', $wpdb->rows("event_i
 fresh(true);
 $wpdb->can_migrate = false;
 $GLOBALS['transients'] = array();
-for ($i = 0; $i < 3; $i++) { queue('page_view', "n$i", $now); }
 file_put_contents($log, '');
+for ($i = 0; $i < 3; $i++) { queue('page_view', "n$i", $now); }
 $first = new FakeClient();
 run($first);
 t('with the migration impossible the replay still sends, newest row first', $first->sent === array('n2', 'n1', 'n0'));
@@ -421,7 +426,7 @@ file_put_contents($log = tempnam(sys_get_temp_dir(), 'dfss'), '');
 ini_set('error_log', $log);
 for ($i = 0; $i < 5; $i++) { queue('page_view', "lost$i"); }
 $lines = array_filter(explode("\n", trim((string) file_get_contents($log))));
-t('a lost event is logged, once whatever the number of requests', count($lines) === 1 && strpos($lines[0], 'insert failed') !== false);
+t('a lost event is logged, once whatever the number of requests (plus one line for the schema)', count(preg_grep('/insert failed/', $lines)) === 1 && count($lines) === 2);
 unlink($log);
 
 // ---- 12. expired count for the panel
@@ -523,6 +528,52 @@ $GLOBALS['posted'] = array();
 $real->heartbeat();
 $h = end($GLOBALS['posted'])['headers'];
 t('depth > 0 with no known event time: the age header is omitted, not 0', $h['X-Dfss-Queue-Depth'] === '1' && !isset($h['X-Dfss-Queue-Oldest-Age']));
+
+// ---- 15. an insert failure report never blocks the migration; a missing table self-heals
+fresh();
+$wpdb->query('DROP TABLE wp_dfss_queue');
+$wpdb->missing = true;
+$GLOBALS['transients']['dfss_queue_insert_notice'] = 1; // a lost event was reported a minute ago
+queue('purchase', 'heal1', $now);
+t('with the insert report already logged, the next insert still migrates and is stored', count($wpdb->rows("event_id = 'heal1'")) === 1);
+t('the two notices use separate transients', DFSS_Queue::INSERT_NOTICE_TRANSIENT !== DFSS_Queue::SCHEMA_NOTICE_TRANSIENT);
+fresh();
+$wpdb->query('DROP TABLE wp_dfss_queue');
+$wpdb->missing = true;
+$wpdb->can_migrate = false;
+file_put_contents($log = tempnam(sys_get_temp_dir(), 'dfss'), '');
+ini_set('error_log', $log);
+queue('page_view', 'lost1');
+t('a lost event sets the insert notice, not the schema one blocking a later migration', !empty($GLOBALS['transients']['dfss_queue_insert_notice']));
+$wpdb->can_migrate = true;
+unset($GLOBALS['transients']['dfss_queue_schema_notice']);
+queue('page_view', 'heal2');
+t('once the migration can run, the next insert self-heals', count($wpdb->rows("event_id = 'heal2'")) === 1);
+unlink($log);
+$wpdb->missing = false;
+t('uninstall also removes the insert notice', strpos(file_get_contents(__DIR__ . '/../uninstall.php'), "delete_transient('dfss_queue_insert_notice')") !== false);
+
+// ---- 16. no heartbeat when the run stopped on a network failure; one after a 5xx or 429
+fresh();
+queue('purchase', 'n1', $now - 1);
+queue('page_view', 'n2', $now - 2);
+$c = new FakeClient(array('n1' => 0));
+$stats = run($c);
+t('a run that stopped on code 0 sends no heartbeat', $c->heartbeats === array() && $stats['network'] === true);
+foreach (array(503, 429) as $code) {
+    fresh();
+    queue('purchase', 'n1', $now - 1);
+    queue('page_view', 'n2', $now - 2);
+    $c = new FakeClient(array('n1' => $code));
+    run($c);
+    t("a run that stopped on $code still sends its heartbeat", count($c->heartbeats) === 1);
+}
+fresh();
+queue('page_view', 'e1', $now - 9 * 86400);
+queue('purchase', 'n1', $now - 1);
+$c = new FakeClient(array('n1' => 0));
+run($c);
+t('expiring rows then stopping on code 0 still sends no heartbeat (it would only wait 4 s)', $c->heartbeats === array());
 
 echo "\n$ok passed, $fail failed\n";
 exit($fail ? 1 : 0);
