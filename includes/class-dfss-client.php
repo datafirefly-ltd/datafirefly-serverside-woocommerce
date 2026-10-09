@@ -114,7 +114,7 @@ class DFSS_Client
     }
 
     /**
-     * Tell the dispatcher the queue's state after a replay that changed it: an empty POST to
+     * Tell the dispatcher the queue's state after a replay that changed it: a POST to
      * /v1/heartbeat, signed like an event, carrying the queue-health headers. Without it the
      * dispatcher's last report is the one from the last event, which a quiet shop may not send for
      * hours. Fire and forget: 4 s, never queued, never retried, any failure (a dispatcher that does
@@ -131,7 +131,10 @@ class DFSS_Client
         if ($url === '') {
             return;
         }
-        $this->request($url, '{}', 4);
+        // The body carries the time in milliseconds: the dispatcher ignores it, but two heartbeats of
+        // one tenant in the same second would otherwise share a signature and the second would be
+        // refused as a replay.
+        $this->request($url, '{"t":' . (int) round(microtime(true) * 1000) . '}', 4);
     }
 
     /**
