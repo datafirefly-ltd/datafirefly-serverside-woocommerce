@@ -390,3 +390,21 @@ msgstr "server"
 #: includes/class-dfss-legacy.php:103
 msgid "An older copy of DataFirefly Server-Side (folder \"datafirefly-serverside\") is still installed. It has been deactivated and this version has taken over with the same settings. You can delete the older copy from the Plugins screen: your settings are kept."
 msgstr "È ancora installata una copia precedente di DataFirefly Server-Side (cartella \"datafirefly-serverside\"). È stata disattivata e questa versione ha preso il suo posto con le stesse impostazioni. Puoi eliminare la copia precedente dalla schermata dei plugin: le tue impostazioni vengono mantenute."
+
+#: datafirefly-server-side.php
+msgid "Expired"
+msgstr "Scaduto"
+
+#. translators: %s: how long ago the retry queue was last processed, e.g. "5 minutes".
+#: datafirefly-server-side.php
+#, php-format
+msgid "Last retry run: %s ago"
+msgstr "Ultimo nuovo tentativo: %s fa"
+
+#: datafirefly-server-side.php
+msgid "No retry run yet"
+msgstr "Nessun nuovo tentativo finora"
+
+#: datafirefly-server-side.php
+msgid "Failed events are retried by the WordPress scheduler every 5 minutes, purchases and refunds first. The scheduler only runs when someone visits the site: on a quiet shop, call wp-cron.php from a server cron job every 5 minutes. Events older than 7 days are marked Expired and not sent."
+msgstr "Gli eventi non riusciti vengono ritentati dal pianificatore di WordPress ogni 5 minuti, prima gli acquisti e i rimborsi. Il pianificatore funziona solo quando qualcuno visita il sito: in un negozio poco frequentato, richiamate wp-cron.php da un cron del server ogni 5 minuti. Gli eventi più vecchi di 7 giorni vengono contrassegnati come Scaduto e non vengono inviati."

@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.29.0
+ * Version:           2.30.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -33,7 +33,7 @@ if (defined('DFSS_VERSION')) {
     return;
 }
 
-define('DFSS_VERSION', '2.29.0');
+define('DFSS_VERSION', '2.30.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -166,9 +166,11 @@ class DFSS_Plugin
         if (get_option('dfss_version', '') === DFSS_VERSION) {
             return;
         }
+        // The queue table is migrated on every version change, connected or not: rows may be waiting
+        // from before a disconnection, and 2.30.0 adds the columns that order their replay.
+        DFSS_Queue::install();
         $o = $this->opts();
         if (!empty($o['enabled']) && $o['tenant_id'] !== '' && $o['hmac_secret'] !== '') {
-            DFSS_Queue::install();
             $this->refresh_public_config($o);
         }
         update_option('dfss_version', DFSS_VERSION);
@@ -1366,12 +1368,20 @@ class DFSS_Plugin
                 /* translators: %d: number of events currently queued for retry. */
                 echo esc_html(sprintf(__('Queued for retry: %d', 'datafirefly-server-side'), $pending));
                 ?>
+                &nbsp;|&nbsp;
+                <?php
+                $last_run = DFSS_Queue::last_run();
+                if (!empty($last_run['time'])) {
+                    /* translators: %s: how long ago the retry queue was last processed, e.g. "5 minutes". */
+                    echo esc_html(sprintf(__('Last retry run: %s ago', 'datafirefly-server-side'), human_time_diff((int) $last_run['time'], time())));
+                } else {
+                    esc_html_e('No retry run yet', 'datafirefly-server-side');
+                }
+                ?>
             </p>
+            <p class="description" style="max-width:1000px;"><?php esc_html_e('Failed events are retried by the WordPress scheduler every 5 minutes, purchases and refunds first. The scheduler only runs when someone visits the site: on a quiet shop, call wp-cron.php from a server cron job every 5 minutes. Events older than 7 days are marked Expired and not sent.', 'datafirefly-server-side'); ?></p>
 
-            <table class="widefat striped" style="max-width:1000px;">
-                <thead>
-                    <tr>
-                        <th><?php esc_html_e('Time', 'datafirefly-server-side'); ?></th>
+XX, 'datafirefly-server-side'); ?></th>
                         <th><?php esc_html_e('Event', 'datafirefly-server-side'); ?></th>
                         <th><?php esc_html_e('Source', 'datafirefly-server-side'); ?></th>
                         <th><?php esc_html_e('Status', 'datafirefly-server-side'); ?></th>
@@ -1417,6 +1427,7 @@ class DFSS_Plugin
             DFSS_Queue::STATUS_SENDING => __('Retrying', 'datafirefly-server-side'),
             DFSS_Queue::STATUS_FAILED => __('Rejected', 'datafirefly-server-side'),
             DFSS_Queue::STATUS_DROPPED => __('Gave up', 'datafirefly-server-side'),
+            DFSS_Queue::STATUS_EXPIRED => __('Expired', 'datafirefly-server-side'),
         );
         $colors = array(
             DFSS_Queue::STATUS_DONE => '#008D9E',
@@ -1424,6 +1435,7 @@ class DFSS_Plugin
             DFSS_Queue::STATUS_SENDING => '#b26a00',
             DFSS_Queue::STATUS_FAILED => '#b32d2e',
             DFSS_Queue::STATUS_DROPPED => '#b32d2e',
+            DFSS_Queue::STATUS_EXPIRED => '#555',
         );
 
         $html = '';

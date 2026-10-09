@@ -172,6 +172,24 @@ class DFSS_Client
         // Signed string: timestamp, LF, then the exact bytes we POST (lowercase hex HMAC-SHA256).
         $signature = hash_hmac('sha256', $timestamp . "\n" . $body, $this->secret);
 
+        $headers = array(
+            'Content-Type' => 'application/json',
+            'X-Dfss-Tenant' => $this->tenant_id,
+            'X-Dfss-Timestamp' => $timestamp,
+            'X-Dfss-Signature-Version' => '2',
+            'X-Dfss-Signature' => $signature,
+        );
+        // Queue health, so the dispatcher can see a shop whose retries run late (WP-Cron without
+        // visitors, a dispatcher outage). Computed once per request, and left out when the queue
+        // cannot be read: an unknown queue is not an empty one. Not part of the signature.
+        if (class_exists('DFSS_Queue', false)) {
+            $signal = DFSS_Queue::signal();
+            if ($signal !== null) {
+                $headers['X-Dfss-Queue-Depth'] = (string) (int) $signal['depth'];
+                $headers['X-Dfss-Queue-Oldest-Age'] = (string) (int) $signal['oldest_age'];
+            }
+        }
+
         // The safe variant refuses loopback and private ranges: the URL can be operator-supplied.
         $response = wp_safe_remote_post(
             $url,
@@ -179,13 +197,7 @@ class DFSS_Client
                 // Tracking must never slow checkout: keep the timeout tight.
                 'timeout' => $timeout,
                 'redirection' => 0,
-                'headers' => array(
-                    'Content-Type' => 'application/json',
-                    'X-Dfss-Tenant' => $this->tenant_id,
-                    'X-Dfss-Timestamp' => $timestamp,
-                    'X-Dfss-Signature-Version' => '2',
-                    'X-Dfss-Signature' => $signature,
-                ),
+                'headers' => $headers,
                 'body' => $body,
             )
         );

@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.29.0
+Stable tag: 2.30.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,15 @@ The core tracker is about 10 KB compressed, loaded deferred in the footer. Each 
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.30.0 =
+* Improved: events that failed to send are retried purchases and refunds first, then the most recent ones. Until now the oldest came first, so after a long outage a sale could wait behind thousands of old page views.
+* New: a queued event older than 7 days is marked Expired and is not sent (no platform accepts it any more). It stays listed in the Activity panel until the usual clean-up, never silently deleted.
+* Improved: each retry run works within a 20 second budget and 200 events, and stops sending after a network failure, a server error or a rate limit instead of trying every remaining event against a dispatcher that is down.
+* New: every signed request to the dispatcher now carries the number of queued events and the age of the oldest one, so a shop whose retries run late is visible.
+* Improved: the Activity panel shows when the retry queue last ran. WordPress runs retries from its scheduler every 5 minutes, but only when the site is visited: on a quiet shop, call wp-cron.php from a server cron job every 5 minutes.
+* Fix: an event is no longer lost if the queue table has not been updated yet when it is saved; the table is now also updated for a shop that is not connected.
+* New: the new messages are translated into French, German, Spanish, Italian, Dutch, Polish, Portuguese and Czech.
 
 = 2.29.0 =
 * New: the settings screen and its messages are translated into French, German, Spanish, Italian, Dutch, Polish, Portuguese and Czech. The language follows the WordPress user's locale; any other language stays in English.
@@ -164,6 +173,9 @@ Yes. When "Require consent" is on (default), no tag is injected and no event is 
 * Server-side purchase event delivery.
 
 == Upgrade Notice ==
+
+= 2.30.0 =
+The retry queue table gets two columns on upgrade (done automatically). Events queued for more than 7 days are no longer sent. No setting changes.
 
 = 2.29.0 =
 Translations added and a few consent fixes. No setting changes.

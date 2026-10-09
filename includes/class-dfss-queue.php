@@ -2,6 +2,20 @@
 /**
  * Retry queue and activity log ({prefix}dfss_queue): failed sends are replayed by cron with
  * backoff; every attempt leaves a row for the Activity panel, trimmed to KEEP_ROWS.
+ *
+ * Replay (2.30.0). WP-Cron fires `dfss_retry` every 5 minutes, but only when WordPress is
+ * visited (or when a real server cron calls wp-cron.php): a quiet shop retries late. Each run:
+ *
+ *   - expires the pending events older than EXPIRY_DAYS (status `expired`: marked, never sent,
+ *     never deleted; a settled row like done/failed/dropped);
+ *   - replays purchases and refunds first, then the most recent events: a five-day-old page view
+ *     is worth nothing, this morning's sale is the point;
+ *   - works within REPLAY_BUDGET_SECONDS and REPLAY_BATCH rows, and starts no new send after a
+ *     network failure (code 0), a 5xx or a 429: a dispatcher that is down is not hammered 200 times;
+ *   - claims each row just before sending it, so overlapping runs never send the same row twice.
+ *
+ * Every signed request carries the queue's depth and the age of its oldest event
+ * (see signal()), so the dispatcher can see a client whose queue is running late.
  */
 if (!defined('ABSPATH')) {
     exit;
@@ -9,6 +23,11 @@ if (!defined('ABSPATH')) {
 
 class DFSS_Queue
 {
+    /**
+     * @var array{depth:int,oldest_age:int}|false|null Per-request cache of signal().
+     */
+    private static $signal_cache = null;
+
     const CRON_HOOK = 'dfss_retry';
     const MAX_ATTEMPTS = 6;
     const KEEP_ROWS = 200;
@@ -18,6 +37,19 @@ class DFSS_Queue
     const PURGE_AFTER = 30 * DAY_IN_SECONDS;
     // A row claimed by a cron run that died mid-send goes back to pending after this long.
     const STALE_CLAIM = 600;
+    // A pending event older than this is expired, never sent: no platform accepts it any more, and
+    // replaying it only delays the ones that still count.
+    const EXPIRY_DAYS = 7;
+    // Rows replayed at most per cron run, and the wall-clock budget (seconds) after which a run
+    // starts no new send. A send can last its own timeout (4 s) past the budget.
+    const REPLAY_BATCH = 200;
+    const REPLAY_BUDGET_SECONDS = 20;
+    // Events replayed before everything else.
+    const PRIORITY_EVENTS = array('purchase', 'refund');
+    // Option: when the last replay ran (Activity panel diagnostics).
+    const LAST_RUN_OPTION = 'dfss_queue_last_run';
+    // Transient: a schema problem was reported or repaired less than an hour ago.
+    const SCHEMA_NOTICE_TRANSIENT = 'dfss_queue_schema_notice';
 
     // Status values stored in the `status` column.
     const STATUS_PENDING = 'pending'; // queued, awaiting a retry
@@ -25,6 +57,7 @@ class DFSS_Queue
     const STATUS_DONE = 'done';       // delivered (2xx)
     const STATUS_FAILED = 'failed';   // non-retryable (401/403), never retried
     const STATUS_DROPPED = 'dropped'; // gave up after MAX_ATTEMPTS
+    const STATUS_EXPIRED = 'expired'; // pending for more than EXPIRY_DAYS, marked and never sent
 
     /**
      * @return string Fully-qualified table name.
@@ -47,11 +80,15 @@ class DFSS_Queue
         $charset_collate = $wpdb->get_charset_collate();
 
         // event_name + event_id are denormalized columns purely so the Activity panel can render
-        // without unserializing every payload.
+        // without unserializing every payload. priority + event_time (2.30.0) order the replay:
+        // purchases and refunds first, then the most recent event (its own time, else the row's
+        // creation).
         $sql = "CREATE TABLE {$table} (
             id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
             event_name VARCHAR(40) NOT NULL DEFAULT '',
             event_id VARCHAR(160) NOT NULL DEFAULT '',
+            priority TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            event_time INT UNSIGNED NOT NULL DEFAULT 0,
             payload LONGTEXT NOT NULL,
             origin VARCHAR(20) NOT NULL DEFAULT 'server',
             status VARCHAR(12) NOT NULL DEFAULT 'pending',
@@ -63,11 +100,45 @@ class DFSS_Queue
             updated_at INT UNSIGNED NOT NULL DEFAULT 0,
             PRIMARY KEY  (id),
             KEY status_next (status, next_attempt),
+            KEY status_prio (status, priority, event_time),
             KEY created_at (created_at)
         ) {$charset_collate};";
 
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         dbDelta($sql);
+
+        self::backfill();
+    }
+
+    /**
+     * Fill priority and event_time for the rows written before 2.30.0. Two set-based UPDATEs that
+     * only touch rows still at the default, so a run interrupted halfway simply resumes, and a
+     * rerun changes nothing. event_time is the row's creation (an epoch, so no time-zone skew):
+     * for a purchase or a beacon it differs from the event by the length of the send only.
+     *
+     * @return bool False when the columns are not there (the migration has not run).
+     */
+    public static function backfill()
+    {
+        global $wpdb;
+
+        $table = self::table();
+        $suppress = $wpdb->suppress_errors(true);
+
+        $a = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare().
+            $wpdb->prepare(
+                "UPDATE {$table} SET priority = 1 WHERE priority = 0 AND event_name IN (%s, %s)", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                self::PRIORITY_EVENTS[0],
+                self::PRIORITY_EVENTS[1]
+            )
+        );
+        $b = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); constant statement.
+            "UPDATE {$table} SET event_time = created_at WHERE event_time = 0" // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        );
+
+        $wpdb->suppress_errors($suppress);
+
+        return $a !== false && $b !== false;
     }
 
     /**
@@ -143,24 +214,31 @@ class DFSS_Queue
     }
 
     /**
-     * Replay due pending rows.
+     * Replay due pending rows, within a time budget (see the class comment).
      *
-     * @param string $tenant_id
-     * @param string $hmac_secret
-     * @param string $endpoint
+     * @param string          $tenant_id
+     * @param string          $hmac_secret
+     * @param string          $endpoint
+     * @param DFSS_Client|null $client  Injected by the tests; built from the credentials otherwise.
+     * @param float|null      $budget   Seconds after which no new send starts (default REPLAY_BUDGET_SECONDS).
+     * @param int|null        $batch    Rows at most (default REPLAY_BATCH).
      *
-     * @return void
+     * @return array{expired:int,sent:int,delivered:int,retry:int,failed:int,dropped:int,stopped:string}
      */
-    public static function process_due($tenant_id, $hmac_secret, $endpoint)
+    public static function process_due($tenant_id, $hmac_secret, $endpoint, $client = null, $budget = null, $batch = null)
     {
         global $wpdb;
 
+        $stats = array('expired' => 0, 'sent' => 0, 'delivered' => 0, 'retry' => 0, 'failed' => 0, 'dropped' => 0, 'stopped' => '');
+
         if ($tenant_id === '' || $hmac_secret === '' || $endpoint === '') {
-            return; // not connected: leave the queue intact
+            return $stats; // not connected: leave the queue intact
         }
 
         $table = self::table();
         $now = time();
+        $deadline = microtime(true) + ($budget === null ? self::REPLAY_BUDGET_SECONDS : (float) $budget);
+        $batch = $batch === null ? self::REPLAY_BATCH : max(1, (int) $batch);
 
         // Purge finished rows past PURGE_AFTER.
         $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
@@ -184,30 +262,36 @@ class DFSS_Queue
             )
         );
 
-        // Bounded batch so a long backlog can't exhaust the cron's time budget.
-        $rows = $wpdb->get_results( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
-            $wpdb->prepare(
-                "SELECT * FROM {$table} WHERE status = %s AND next_attempt <= %d ORDER BY id ASC LIMIT 20", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-                self::STATUS_PENDING,
-                $now
-            )
-        );
+        // Events too old to count are marked, before anything is selected: they must not take a
+        // slot of the batch.
+        $stats['expired'] = self::expire_old($now);
+
+        $rows = self::select_due($now, $batch);
         if (empty($rows)) {
             self::trim();
+            self::remember_run($now, $stats);
 
-            return;
+            return $stats;
         }
 
-        $client = new DFSS_Client($tenant_id, $hmac_secret, $endpoint);
+        if ($client === null) {
+            $client = new DFSS_Client($tenant_id, $hmac_secret, $endpoint);
+        }
 
         foreach ($rows as $row) {
+            if (microtime(true) >= $deadline) {
+                $stats['stopped'] = 'budget';
+                break; // the rest stays pending, untouched, for the next run
+            }
+
             // Atomic claim: WP-Cron does not lock, so two overlapping runs may select the same row;
-            // only the UPDATE that flips it from pending wins.
+            // only the UPDATE that flips it from pending wins. Claimed one by one, just before the
+            // send: a run that stops early leaves no row stuck in `sending`.
             $claimed = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
                 $wpdb->prepare(
                     "UPDATE {$table} SET status = %s, updated_at = %d WHERE id = %d AND status = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
                     self::STATUS_SENDING,
-                    $now,
+                    time(),
                     (int) $row->id,
                     self::STATUS_PENDING
                 )
@@ -220,40 +304,251 @@ class DFSS_Queue
             if (!is_array($payload)) {
                 // Corrupt row, drop it so it can't loop forever.
                 self::update_status((int) $row->id, self::STATUS_DROPPED, (int) $row->attempts, 0, 0, 'corrupt_payload');
+                ++$stats['dropped'];
                 continue;
             }
 
             $result = $client->send($payload);
+            ++$stats['sent'];
             $attempts = (int) $row->attempts + 1;
             $code = isset($result['code']) ? (int) $result['code'] : 0;
 
             if (!empty($result['ok'])) {
                 self::update_status((int) $row->id, self::STATUS_DONE, $attempts, 0, $code, '');
+                ++$stats['delivered'];
                 continue;
             }
 
             if (self::is_non_retryable($code)) {
                 self::update_status((int) $row->id, self::STATUS_FAILED, $attempts, 0, $code, self::clip($result));
+                ++$stats['failed'];
                 continue;
             }
 
             if ($attempts >= self::MAX_ATTEMPTS) {
                 self::update_status((int) $row->id, self::STATUS_DROPPED, $attempts, 0, $code, self::clip($result));
-                continue;
+                ++$stats['dropped'];
+            } else {
+                // Still retryable, back off further.
+                self::update_status(
+                    (int) $row->id,
+                    self::STATUS_PENDING,
+                    $attempts,
+                    $now + self::backoff($attempts),
+                    $code,
+                    self::clip($result)
+                );
+                ++$stats['retry'];
             }
 
-            // Still retryable, back off further.
-            self::update_status(
-                (int) $row->id,
-                self::STATUS_PENDING,
-                $attempts,
-                $now + self::backoff($attempts),
-                $code,
-                self::clip($result)
-            );
+            // The dispatcher or the network is struggling: the next row would fail the same way.
+            if (self::stops_run($code)) {
+                $stats['stopped'] = 'dispatcher';
+                break;
+            }
         }
 
         self::trim();
+        self::remember_run($now, $stats);
+
+        return $stats;
+    }
+
+    /**
+     * A failure that says "stop sending for now": no answer at all (code 0), a server error or
+     * rate limiting. A 4xx other than 429 concerns that one event only.
+     *
+     * @param int $code
+     *
+     * @return bool
+     */
+    public static function stops_run($code)
+    {
+        $code = (int) $code;
+
+        return $code === 0 || $code === 429 || $code >= 500;
+    }
+
+    /**
+     * Queue health for the X-Dfss-Queue-Depth and X-Dfss-Queue-Oldest-Age headers: the pending
+     * rows and the age in seconds of the oldest one's event (0 when none).
+     *
+     * One aggregate query, at most once per request: a figure a few events off is fine, a query per
+     * send is not. Null when the queue cannot be read (an unknown queue is not an empty one).
+     *
+     * @return array{depth:int,oldest_age:int}|null
+     */
+    public static function signal()
+    {
+        global $wpdb;
+
+        if (self::$signal_cache !== null) {
+            return self::$signal_cache === false ? null : self::$signal_cache;
+        }
+
+        $table = self::table();
+        $suppress = $wpdb->suppress_errors(true);
+        $row = $wpdb->get_row( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); live queue state must not be served from cache.
+            $wpdb->prepare(
+                "SELECT COUNT(*) AS depth, MIN(NULLIF(event_time, 0)) AS oldest FROM {$table} WHERE status = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                self::STATUS_PENDING
+            )
+        );
+        $wpdb->suppress_errors($suppress);
+
+        if (!is_object($row)) {
+            self::$signal_cache = false;
+
+            return null;
+        }
+        $depth = (int) $row->depth;
+        $oldest = (int) $row->oldest;
+        self::$signal_cache = array(
+            'depth' => $depth,
+            'oldest_age' => ($depth > 0 && $oldest > 0) ? max(0, time() - $oldest) : 0,
+        );
+
+        return self::$signal_cache;
+    }
+
+    /**
+     * Forget the per-request signal (tests, and a long-running process).
+     *
+     * @return void
+     */
+    public static function reset_signal()
+    {
+        self::$signal_cache = null;
+    }
+
+    /**
+     * Mark `expired` every pending row whose event is older than EXPIRY_DAYS (its own time, else
+     * the row's creation). Marked, never sent, never deleted: the row leaves like any settled one.
+     * When the columns are not there yet (migration not run) the age is the row's creation.
+     *
+     * @param int $now
+     *
+     * @return int Rows expired.
+     */
+    private static function expire_old($now)
+    {
+        global $wpdb;
+
+        $table = self::table();
+        $cutoff = $now - self::EXPIRY_DAYS * DAY_IN_SECONDS;
+        $suppress = $wpdb->suppress_errors(true);
+
+        $done = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
+            $wpdb->prepare(
+                "UPDATE {$table} SET status = %s, payload = %s, next_attempt = 0, last_error = %s, updated_at = %d WHERE status = %s AND ((event_time > 0 AND event_time < %d) OR (event_time = 0 AND created_at < %d))", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                self::STATUS_EXPIRED,
+                '{}',
+                'expired',
+                $now,
+                self::STATUS_PENDING,
+                $cutoff,
+                $cutoff
+            )
+        );
+        if ($done === false) {
+            self::schema_behind();
+            $done = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare().
+                $wpdb->prepare(
+                    "UPDATE {$table} SET status = %s, payload = %s, next_attempt = 0, last_error = %s, updated_at = %d WHERE status = %s AND created_at < %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                    self::STATUS_EXPIRED,
+                    '{}',
+                    'expired',
+                    $now,
+                    self::STATUS_PENDING,
+                    $cutoff
+                )
+            );
+        }
+        $wpdb->suppress_errors($suppress);
+
+        return $done === false ? 0 : (int) $done;
+    }
+
+    /**
+     * The due rows: purchases and refunds first, then the most recent event. A queue whose table
+     * is still in the pre-2.30.0 shape (files updated, migration not run) is replayed newest row
+     * first instead of not at all, and the migration is attempted.
+     *
+     * @param int $now
+     * @param int $batch
+     *
+     * @return array<int,object>
+     */
+    private static function select_due($now, $batch)
+    {
+        global $wpdb;
+
+        $table = self::table();
+        $suppress = $wpdb->suppress_errors(true);
+
+        $rows = $wpdb->get_results( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
+            $wpdb->prepare(
+                "SELECT * FROM {$table} WHERE status = %s AND next_attempt <= %d ORDER BY priority DESC, event_time DESC, id DESC LIMIT %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                self::STATUS_PENDING,
+                $now,
+                $batch
+            )
+        );
+        if ($rows === null) {
+            self::schema_behind();
+            $rows = $wpdb->get_results( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare().
+                $wpdb->prepare(
+                    "SELECT * FROM {$table} WHERE status = %s AND next_attempt <= %d ORDER BY id DESC LIMIT %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                    self::STATUS_PENDING,
+                    $now,
+                    $batch
+                )
+            );
+        }
+        $wpdb->suppress_errors($suppress);
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * The queue table is behind the code. Try the migration, and say so in the PHP error log at
+     * most once an hour: a replay that runs every five minutes must not fill the log.
+     *
+     * @return void
+     */
+    private static function schema_behind()
+    {
+        if (get_transient(self::SCHEMA_NOTICE_TRANSIENT)) {
+            return;
+        }
+        set_transient(self::SCHEMA_NOTICE_TRANSIENT, 1, HOUR_IN_SECONDS);
+        self::install();
+        error_log('[DataFirefly SS] retry queue table is behind the plugin version; migration attempted, replay continues in creation order.'); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- one line an hour, the only trace of a migration that did not run.
+    }
+
+    /**
+     * When the last replay ran, for the Activity panel (WP-Cron needs visitors or a real cron).
+     *
+     * @param int   $now
+     * @param array $stats
+     *
+     * @return void
+     */
+    private static function remember_run($now, array $stats)
+    {
+        update_option(self::LAST_RUN_OPTION, array('time' => (int) $now, 'expired' => (int) $stats['expired'], 'sent' => (int) $stats['sent']), false);
+    }
+
+    /**
+     * The last replay, or an empty array when none ran yet.
+     *
+     * @return array{time?:int,expired?:int,sent?:int}
+     */
+    public static function last_run()
+    {
+        $v = get_option(self::LAST_RUN_OPTION, array());
+
+        return is_array($v) ? $v : array();
     }
 
     /**
@@ -336,23 +631,42 @@ class DFSS_Queue
             return; // cannot persist: skip silently (caller already attempted send)
         }
 
-        $wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- state write to the plugin's own retry-queue table; caching does not apply.
-            self::table(),
-            array(
-                'event_name' => substr((string) ($payload['eventName'] ?? ''), 0, 40),
-                'event_id' => substr((string) ($payload['eventId'] ?? ''), 0, 160),
-                'payload' => $encoded,
-                'origin' => substr((string) $origin, 0, 20),
-                'status' => $status,
-                'attempts' => (int) $attempts,
-                'next_attempt' => (int) $next_attempt,
-                'last_code' => (int) $code,
-                'last_error' => substr((string) $error, 0, 255),
-                'created_at' => $now,
-                'updated_at' => $now,
-            ),
-            array('%s', '%s', '%s', '%s', '%s', '%d', '%d', '%d', '%s', '%d', '%d')
+        $event_name = (string) ($payload['eventName'] ?? '');
+        // The event's own time; the row's creation when the payload has none or an absurd one
+        // (more than a day ahead).
+        $event_time = isset($payload['eventTime']) && is_numeric($payload['eventTime']) ? (int) $payload['eventTime'] : 0;
+        if ($event_time <= 0 || $event_time > $now + DAY_IN_SECONDS) {
+            $event_time = $now;
+        }
+
+        $row = array(
+            'event_name' => substr($event_name, 0, 40),
+            'event_id' => substr((string) ($payload['eventId'] ?? ''), 0, 160),
+            'priority' => in_array($event_name, self::PRIORITY_EVENTS, true) ? 1 : 0,
+            'event_time' => $event_time,
+            'payload' => $encoded,
+            'origin' => substr((string) $origin, 0, 20),
+            'status' => $status,
+            'attempts' => (int) $attempts,
+            'next_attempt' => (int) $next_attempt,
+            'last_code' => (int) $code,
+            'last_error' => substr((string) $error, 0, 255),
+            'created_at' => $now,
+            'updated_at' => $now,
         );
+        $format = array('%s', '%s', '%d', '%d', '%s', '%s', '%s', '%d', '%d', '%d', '%s', '%d', '%d');
+
+        $suppress = $wpdb->suppress_errors(true);
+        $ok = $wpdb->insert(self::table(), $row, $format); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- state write to the plugin's own retry-queue table; caching does not apply.
+        if ($ok === false) {
+            // The table may still have the pre-2.30.0 shape (files updated, migration not run
+            // yet). A failed send must never be lost for a missing column: write it without the
+            // two new ones. The migration dates it from its creation.
+            unset($row['priority'], $row['event_time']);
+            array_splice($format, 2, 2);
+            $wpdb->insert(self::table(), $row, $format); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- same table, same write, without the two newer columns.
+        }
+        $wpdb->suppress_errors($suppress);
     }
 
     /**
