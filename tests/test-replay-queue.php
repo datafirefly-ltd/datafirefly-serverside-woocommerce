@@ -218,6 +218,14 @@ function queue($name, $id, $event_time = null)
     $wpdb->query("UPDATE wp_dfss_queue SET next_attempt = 0 WHERE event_id = '$id'");
 }
 
+/** Queue one failed event whose event happened, and whose queue row was created, $days ago. */
+function queue_old($name, $id, $days, $event_days = null)
+{
+    global $wpdb;
+    queue($name, $id, time() - ($event_days ?? $days) * 86400);
+    $wpdb->query("UPDATE wp_dfss_queue SET created_at = " . (time() - $days * 86400) . " WHERE event_id = '$id'");
+}
+
 function run($client, $budget = null, $batch = null)
 {
     return DFSS_Queue::process_due('t', 's', 'https://x/v1/events', $client, $budget, $batch);
@@ -259,14 +267,15 @@ t('priority 1 for purchase and refund, 0 for the rest', $pr === array('p1' => 1,
 
 // ---- 3. expiry
 fresh();
-queue('purchase', 'old-buy', $now - 8 * 86400);
-queue('page_view', 'old-pv', $now - 7 * 86400 - 60);
+queue_old('purchase', 'old-buy', 8);
+queue_old('page_view', 'old-pv', 7, 7);
+$wpdb->query("UPDATE wp_dfss_queue SET created_at = " . ($now - 7 * 86400 - 60) . ", event_time = " . ($now - 7 * 86400 - 60) . " WHERE event_id = 'old-pv'");
 queue('page_view', 'fresh-pv', $now - 6 * 86400);
 queue('page_view', 'legacy', null);
 $wpdb->query("UPDATE wp_dfss_queue SET event_time = 0, created_at = " . ($now - 9 * 86400) . " WHERE event_id = 'legacy'");
 $c = new FakeClient();
 $stats = run($c);
-t('events older than 7 days are never sent', $c->sent === array('fresh-pv'));
+t('events older than 7 days, queued more than 7 days ago, are never sent', $c->sent === array('fresh-pv'));
 t('they are marked expired, not deleted', count($wpdb->rows("status = 'expired'")) === 3);
 t('the expiry count is reported', $stats['expired'] === 3);
 t('an expired row drops its payload', $wpdb->rows("event_id = 'old-buy'")[0]['payload'] === '{}');
@@ -276,6 +285,17 @@ $wpdb->query("UPDATE wp_dfss_queue SET created_at = " . ($now - 31 * 86400) . " 
 run(new FakeClient());
 t('an expired row is purged with the settled rows after the retention', count($wpdb->rows("event_id = 'old-buy'")) === 0);
 t('the other expired rows are still there', count($wpdb->rows("status = 'expired'")) === 2);
+
+// the later of the event time and the queueing decides
+fresh();
+queue('purchase', 'late-buy', $now - 8 * 86400); // order paid 8 days after it was created: queued now
+queue_old('page_view', 'stale-row', 8, 8);
+queue_old('purchase', 'old-event-fresh-row', 3, 20); // event 20 days old, queued 3 days ago
+$c = new FakeClient();
+run($c);
+t('an old event queued just now is not expired: it is sent', in_array('late-buy', $c->sent, true) && $wpdb->rows("event_id = 'late-buy'")[0]['status'] === 'done');
+t('an old event queued less than 7 days ago is sent too', in_array('old-event-fresh-row', $c->sent, true));
+t('a row queued more than 7 days ago, for an event as old, is expired', $wpdb->rows("event_id = 'stale-row'")[0]['status'] === 'expired' && !in_array('stale-row', $c->sent, true));
 
 // ---- 4. time budget
 fresh();
@@ -431,28 +451,23 @@ unlink($log);
 
 // ---- 12. expired count for the panel
 fresh();
-queue('page_view', 'x1', $now - 9 * 86400);
-queue('page_view', 'x2', $now - 9 * 86400);
+queue_old('page_view', 'x1', 9);
+queue_old('page_view', 'x2', 9);
 queue('page_view', 'x3', $now);
 run(new FakeClient());
 t('count_expired counts the expired rows listed', DFSS_Queue::count_expired() === 2);
 t('the last run remembers how many it expired', DFSS_Queue::last_run()['expired'] === 2);
 
-// ---- 13. timeouts: checkout path 4 s, browser relay 8 s with the connect wait kept at 4
+// ---- 13. timeouts: every send, checkout, beacon relay and replay, keeps the 4 s timeout
 $GLOBALS['posted'] = array();
 $GLOBALS['hooks'] = array();
-$GLOBALS['hooks_at_post'] = array();
 $client = new DFSS_Client('t', 's', 'https://x/v1/events');
 $client->send(array('eventName' => 'purchase', 'eventId' => 'o1'));
-t('the checkout path keeps its 4 s timeout', $GLOBALS['posted'][0]['timeout'] === 4);
-t('and does not touch the connect timeout', empty($GLOBALS['hooks']['http_api_curl']));
-$client->send(array('eventName' => 'page_view', 'eventId' => 'b1'), 8);
-t('the beacon relay waits up to 8 s in total', $GLOBALS['posted'][1]['timeout'] === 8);
-t('the connect wait is capped separately during the 8 s request and the cap is removed afterwards', $GLOBALS['hooks_at_post'] === array(0, 1) && empty($GLOBALS['hooks']['http_api_curl']));
+$client->send(array('eventName' => 'page_view', 'eventId' => 'b1'));
+t('sends keep their 4 s timeout and touch no connect setting', $GLOBALS['posted'][0]['timeout'] === 4 && $GLOBALS['posted'][1]['timeout'] === 4 && empty($GLOBALS['hooks']['http_api_curl']));
 $rest = file_get_contents(__DIR__ . '/../includes/class-dfss-rest.php');
 $main = file_get_contents(__DIR__ . '/../datafirefly-server-side.php');
-t('the REST relay passes its own timeout, 8 s', strpos($rest, "const RELAY_TIMEOUT = 8;") !== false && strpos($rest, '->send($payload, self::RELAY_TIMEOUT)') !== false);
-t('no order or checkout hook passes a timeout', preg_match('/->send\(\$payload, /', $main) === 0);
+t('the beacon relay and the order hooks pass no longer timeout', strpos($rest, 'RELAY_TIMEOUT') === false && strpos($rest, '->send($payload)') !== false && preg_match('/->send\(\$payload, /', $main) === 0);
 $unin = file_get_contents(__DIR__ . '/../uninstall.php');
 t('uninstall removes the last-run option and the schema transient', strpos($unin, "'dfss_queue_last_run'") !== false && strpos($unin, "delete_transient('dfss_queue_schema_notice')") !== false);
 
@@ -475,7 +490,7 @@ $c = new FakeClient();
 run($c);
 t('no heartbeat when nothing was due', $c->heartbeats === array());
 fresh();
-queue('page_view', 'old', $now - 9 * 86400);
+queue_old('page_view', 'old', 9);
 $c = new FakeClient();
 run($c);
 t('a run that only expired rows sends one heartbeat', count($c->heartbeats) === 1);
@@ -569,7 +584,7 @@ foreach (array(503, 429) as $code) {
     t("a run that stopped on $code still sends its heartbeat", count($c->heartbeats) === 1);
 }
 fresh();
-queue('page_view', 'e1', $now - 9 * 86400);
+queue_old('page_view', 'e1', 9);
 queue('purchase', 'n1', $now - 1);
 $c = new FakeClient(array('n1' => 0));
 run($c);

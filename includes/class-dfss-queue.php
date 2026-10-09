@@ -6,8 +6,9 @@
  * Replay (2.30.0). WP-Cron fires `dfss_retry` every 5 minutes, but only when WordPress is
  * visited (or when a real server cron calls wp-cron.php): a quiet shop retries late. Each run:
  *
- *   - expires the pending events older than EXPIRY_DAYS (status `expired`: marked, never sent,
- *     never deleted; a settled row like done/failed/dropped);
+ *   - expires the pending events whose event AND queueing are both older than EXPIRY_DAYS (the
+ *     later date decides, so every queued event gets a full week of retries; status `expired`:
+ *     marked, never sent, never deleted; a settled row like done/failed/dropped);
  *   - replays purchases and refunds first, then the most recent events: a five-day-old page view
  *     is worth nothing, this morning's sale is the point;
  *   - works within REPLAY_BUDGET_SECONDS and REPLAY_BATCH rows, and starts no new send after a
@@ -37,8 +38,10 @@ class DFSS_Queue
     const PURGE_AFTER = 30 * DAY_IN_SECONDS;
     // A row claimed by a cron run that died mid-send goes back to pending after this long.
     const STALE_CLAIM = 600;
-    // A pending event older than this is expired, never sent: no platform accepts it any more, and
-    // replaying it only delays the ones that still count.
+    // A pending event is expired, never sent, once both its event and its queueing are older than
+    // this: replaying it only delays the ones that still count. Counted from the later of the two,
+    // so an event that reaches the queue late (a purchase of an order paid days after it was
+    // created) still gets its full week of retries.
     const EXPIRY_DAYS = 7;
     // Rows replayed at most per cron run, and the wall-clock budget (seconds) after which a run
     // starts no new send. A send can last its own timeout (4 s) past the budget, and the heartbeat
@@ -456,8 +459,8 @@ class DFSS_Queue
     }
 
     /**
-     * Mark `expired` every pending row whose event is older than EXPIRY_DAYS (its own time, else
-     * the row's creation). Marked, never sent, never deleted: the row leaves like any settled one.
+     * Mark `expired` every pending row whose event time AND creation in the queue are older than
+     * EXPIRY_DAYS (a row without an event time counts by its creation). Marked, never sent, never deleted: the row leaves like any settled one.
      * When the columns are not there yet (migration not run) the age is the row's creation.
      *
      * @param int $now
@@ -474,7 +477,7 @@ class DFSS_Queue
 
         $done = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
             $wpdb->prepare(
-                "UPDATE {$table} SET status = %s, payload = %s, next_attempt = 0, last_error = %s, updated_at = %d WHERE status = %s AND ((event_time > 0 AND event_time < %d) OR (event_time = 0 AND created_at < %d))", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "UPDATE {$table} SET status = %s, payload = %s, next_attempt = 0, last_error = %s, updated_at = %d WHERE status = %s AND event_time < %d AND created_at < %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
                 self::STATUS_EXPIRED,
                 '{}',
                 'expired',
