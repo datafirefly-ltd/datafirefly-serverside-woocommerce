@@ -1378,10 +1378,18 @@ class DFSS_Plugin
                     esc_html_e('No retry run yet', 'datafirefly-server-side');
                 }
                 ?>
+                &nbsp;|&nbsp;
+                <?php
+                /* translators: 1: events expired by the last retry run, 2: expired events currently listed. */
+                echo esc_html(sprintf(__('Expired: %1$d in the last run, %2$d listed', 'datafirefly-server-side'), isset($last_run['expired']) ? (int) $last_run['expired'] : 0, DFSS_Queue::count_expired()));
+                ?>
             </p>
             <p class="description" style="max-width:1000px;"><?php esc_html_e('Failed events are retried by the WordPress scheduler every 5 minutes, purchases and refunds first. The scheduler only runs when someone visits the site: on a quiet shop, call wp-cron.php from a server cron job every 5 minutes. Events older than 7 days are marked Expired and not sent.', 'datafirefly-server-side'); ?></p>
 
-XX, 'datafirefly-server-side'); ?></th>
+            <table class="widefat striped" style="max-width:1000px;">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e('Time', 'datafirefly-server-side'); ?></th>
                         <th><?php esc_html_e('Event', 'datafirefly-server-side'); ?></th>
                         <th><?php esc_html_e('Source', 'datafirefly-server-side'); ?></th>
                         <th><?php esc_html_e('Status', 'datafirefly-server-side'); ?></th>

@@ -285,15 +285,18 @@ class DFSS_Queue
             }
 
             // Atomic claim: WP-Cron does not lock, so two overlapping runs may select the same row;
-            // only the UPDATE that flips it from pending wins. Claimed one by one, just before the
+            // only the UPDATE that flips it from pending wins. It also checks the attempts and the due time
+            // read with the row: a row another run already retried and rescheduled is not sent again. Claimed one by one, just before the
             // send: a run that stops early leaves no row stuck in `sending`.
             $claimed = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); a live retry queue must not be served from cache.
                 $wpdb->prepare(
-                    "UPDATE {$table} SET status = %s, updated_at = %d WHERE id = %d AND status = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                    "UPDATE {$table} SET status = %s, updated_at = %d WHERE id = %d AND status = %s AND attempts = %d AND next_attempt <= %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
                     self::STATUS_SENDING,
                     time(),
                     (int) $row->id,
-                    self::STATUS_PENDING
+                    self::STATUS_PENDING,
+                    (int) $row->attempts,
+                    $now
                 )
             );
             if ($claimed !== 1) {
@@ -494,7 +497,9 @@ class DFSS_Queue
                 $batch
             )
         );
-        if ($rows === null) {
+        // wpdb returns an empty array, not null, when the query fails: the error text tells.
+        if ($wpdb->last_error !== '' || !is_array($rows)) {
+            $wpdb->last_error = '';
             self::schema_behind();
             $rows = $wpdb->get_results( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare().
                 $wpdb->prepare(
@@ -521,9 +526,25 @@ class DFSS_Queue
         if (get_transient(self::SCHEMA_NOTICE_TRANSIENT)) {
             return;
         }
-        set_transient(self::SCHEMA_NOTICE_TRANSIENT, 1, HOUR_IN_SECONDS);
         self::install();
-        error_log('[DataFirefly SS] retry queue table is behind the plugin version; migration attempted, replay continues in creation order.'); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- one line an hour, the only trace of a migration that did not run.
+        self::log_once('retry queue table is behind the plugin version; migration attempted, replay continues in creation order.');
+    }
+
+    /**
+     * One line in the PHP error log, at most once an hour whatever the cause: the queue runs on
+     * every storefront event and every five minutes, a log line each time would flood it.
+     *
+     * @param string $message
+     *
+     * @return void
+     */
+    private static function log_once($message)
+    {
+        if (get_transient(self::SCHEMA_NOTICE_TRANSIENT)) {
+            return;
+        }
+        set_transient(self::SCHEMA_NOTICE_TRANSIENT, 1, HOUR_IN_SECONDS);
+        error_log('[DataFirefly SS] ' . $message); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- one line an hour, the only trace of a queue that does not work.
     }
 
     /**
@@ -607,6 +628,22 @@ class DFSS_Queue
         );
     }
 
+    /**
+     * Number of expired rows still listed (Activity panel).
+     *
+     * @return int
+     */
+    public static function count_expired()
+    {
+        global $wpdb;
+
+        $table = self::table();
+
+        return (int) $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table ({$wpdb->prefix}dfss_queue, name built from $wpdb->prefix only); values are passed through $wpdb->prepare(); live queue state must not be served from cache.
+            $wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE status = %s", self::STATUS_EXPIRED) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        );
+    }
+
     // ---- internals ---------------------------------------------------------
 
     /**
@@ -664,7 +701,11 @@ class DFSS_Queue
             // two new ones. The migration dates it from its creation.
             unset($row['priority'], $row['event_time']);
             array_splice($format, 2, 2);
-            $wpdb->insert(self::table(), $row, $format); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- same table, same write, without the two newer columns.
+            $ok = $wpdb->insert(self::table(), $row, $format); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- same table, same write, without the two newer columns.
+            if ($ok === false) {
+                // The event is lost: say so, at most once an hour.
+                self::log_once('retry queue insert failed, event not queued: ' . substr((string) $wpdb->last_error, 0, 200));
+            }
         }
         $wpdb->suppress_errors($suppress);
     }

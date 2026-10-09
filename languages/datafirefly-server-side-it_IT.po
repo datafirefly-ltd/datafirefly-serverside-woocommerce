@@ -408,3 +408,9 @@ msgstr "Nessun nuovo tentativo finora"
 #: datafirefly-server-side.php
 msgid "Failed events are retried by the WordPress scheduler every 5 minutes, purchases and refunds first. The scheduler only runs when someone visits the site: on a quiet shop, call wp-cron.php from a server cron job every 5 minutes. Events older than 7 days are marked Expired and not sent."
 msgstr "Gli eventi non riusciti vengono ritentati dal pianificatore di WordPress ogni 5 minuti, prima gli acquisti e i rimborsi. Il pianificatore funziona solo quando qualcuno visita il sito: in un negozio poco frequentato, richiamate wp-cron.php da un cron del server ogni 5 minuti. Gli eventi più vecchi di 7 giorni vengono contrassegnati come Scaduto e non vengono inviati."
+
+#. translators: 1: events expired by the last retry run, 2: expired events currently listed.
+#: datafirefly-server-side.php
+#, php-format
+msgid "Expired: %1$d in the last run, %2$d listed"
+msgstr "Scaduti: %1$d nell'ultimo tentativo, %2$d elencati"

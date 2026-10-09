@@ -408,3 +408,9 @@ msgstr "Noch kein Wiederholungslauf"
 #: datafirefly-server-side.php
 msgid "Failed events are retried by the WordPress scheduler every 5 minutes, purchases and refunds first. The scheduler only runs when someone visits the site: on a quiet shop, call wp-cron.php from a server cron job every 5 minutes. Events older than 7 days are marked Expired and not sent."
 msgstr "Fehlgeschlagene Ereignisse werden vom WordPress-Planer alle 5 Minuten erneut gesendet, Käufe und Erstattungen zuerst. Der Planer läuft nur, wenn jemand die Website besucht: Rufen Sie bei einem wenig besuchten Shop wp-cron.php alle 5 Minuten über einen Server-Cronjob auf. Ereignisse, die älter als 7 Tage sind, werden als Abgelaufen markiert und nicht gesendet."
+
+#. translators: 1: events expired by the last retry run, 2: expired events currently listed.
+#: datafirefly-server-side.php
+#, php-format
+msgid "Expired: %1$d in the last run, %2$d listed"
+msgstr "Abgelaufen: %1$d im letzten Lauf, %2$d aufgelistet"

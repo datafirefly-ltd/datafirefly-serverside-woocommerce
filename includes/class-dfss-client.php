@@ -32,10 +32,12 @@ class DFSS_Client
      * Sign and send one event.
      *
      * @param array $payload IncomingEvent shape (see DFSS_Event_Builder)
+     * @param int   $timeout Total HTTP timeout in seconds: 4 on the checkout path, longer for the
+     *                       browser-beacon relay. The connect timeout stays at 4 either way.
      *
      * @return array{ok:bool,code:int,message:string}
      */
-    public function send(array $payload)
+    public function send(array $payload, $timeout = 4)
     {
         if ($this->tenant_id === '' || $this->secret === '' || $this->endpoint === '') {
             return array('ok' => false, 'code' => 0, 'message' => 'not_configured');
@@ -53,7 +55,7 @@ class DFSS_Client
             return array('ok' => false, 'code' => 0, 'message' => 'json_encode_failed');
         }
 
-        return $this->request($this->endpoint, $body);
+        return $this->request($this->endpoint, $body, (int) $timeout);
     }
 
     /**
@@ -190,6 +192,16 @@ class DFSS_Client
             }
         }
 
+        // WordPress gives cURL the same value for the total and the connect timeout: a longer total
+        // timeout must not lengthen the connect wait.
+        $connect_cap = null;
+        if ($timeout > 4) {
+            $connect_cap = function ($handle) {
+                curl_setopt($handle, CURLOPT_CONNECTTIMEOUT, 4); // phpcs:ignore WordPress.WP.AlternativeFunctions.curl_curl_setopt -- capping the connect wait on WordPress' own cURL handle, through its http_api_curl action.
+            };
+            add_action('http_api_curl', $connect_cap);
+        }
+
         // The safe variant refuses loopback and private ranges: the URL can be operator-supplied.
         $response = wp_safe_remote_post(
             $url,
@@ -201,6 +213,10 @@ class DFSS_Client
                 'body' => $body,
             )
         );
+
+        if ($connect_cap !== null) {
+            remove_action('http_api_curl', $connect_cap);
+        }
 
         if (is_wp_error($response)) {
             return array('ok' => false, 'code' => 0, 'message' => $response->get_error_message());

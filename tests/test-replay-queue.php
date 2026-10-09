@@ -24,9 +24,14 @@ function is_wp_error($r) { return false; }
 function wp_remote_retrieve_response_code($r) { return $r['code']; }
 function wp_remote_retrieve_body($r) { return $r['body']; }
 $GLOBALS['posted'] = array();
+$GLOBALS['hooks'] = array();
+function add_action($h, $cb) { $GLOBALS['hooks'][$h][] = $cb; }
+function remove_action($h, $cb) { $GLOBALS['hooks'][$h] = array_values(array_filter($GLOBALS['hooks'][$h] ?? array(), function ($x) use ($cb) { return $x !== $cb; })); }
 function wp_safe_remote_post($url, $args)
 {
     $GLOBALS['posted'][] = $args;
+    $GLOBALS['posted_urls'][] = $url;
+    $GLOBALS['hooks_at_post'][] = count($GLOBALS['hooks']['http_api_curl'] ?? array());
 
     return array('code' => 200, 'body' => '{}');
 }
@@ -80,6 +85,7 @@ class FakeWpdb
     public function query($sql)
     {
         ++$this->queries;
+        $this->last_error = '';
         try {
             return $this->pdo->exec($sql);
         } catch (Throwable $e) {
@@ -88,14 +94,17 @@ class FakeWpdb
         }
     }
 
+    // Like the real wpdb: an SQL error leaves last_error set and get_results() returns an EMPTY
+    // ARRAY (query() flushes, nothing is fetched), get_row() returns null.
     public function get_results($sql)
     {
         ++$this->queries;
+        $this->last_error = '';
         try {
             return $this->pdo->query($sql)->fetchAll(PDO::FETCH_OBJ);
         } catch (Throwable $e) {
             $this->last_error = $e->getMessage();
-            return null;
+            return array();
         }
     }
 
@@ -114,6 +123,7 @@ class FakeWpdb
     public function insert($table, $data, $format = null)
     {
         ++$this->queries;
+        $this->last_error = '';
         try {
             $cols = implode(',', array_keys($data));
             $vals = implode(',', array_map(function ($v) { return $this->pdo->quote((string) $v); }, $data));
@@ -153,7 +163,7 @@ class FakeClient extends DFSS_Client
 
     public function __construct($codes = array()) { $this->codes = $codes; }
 
-    public function send(array $payload)
+    public function send(array $payload, $timeout = 4)
     {
         $this->sent[] = $payload['eventId'];
         if ($this->delay_us) { usleep($this->delay_us); }
@@ -378,6 +388,57 @@ DFSS_Queue::backfill();
 t('a second backfill changes nothing (rows already dated are left alone)', (int) $wpdb->rows("event_id = 'b2'")[0]['event_time'] === 4242);
 $wpdb->create(true);
 t('backfill reports the migration has not run when the columns are missing', DFSS_Queue::backfill() === false);
+
+// ---- 10. claim guarded by the version read with the row
+fresh();
+queue('page_view', 'first', $now - 1);
+queue('page_view', 'second', $now - 2);
+$c = new FakeClient();
+$c->on_send = function ($id) use ($wpdb, $now) {
+    // another run retried 'second' and rescheduled it, between our selection and our claim
+    $wpdb->query("UPDATE wp_dfss_queue SET attempts = 2, next_attempt = " . ($now + 3600) . " WHERE event_id = 'second'");
+};
+run($c);
+t('a row rescheduled by a concurrent run is not sent again', $c->sent === array('first'));
+$r = $wpdb->rows("event_id = 'second'")[0];
+t('and its attempts and due time are not overwritten', (int) $r['attempts'] === 2 && (int) $r['next_attempt'] === $now + 3600 && $r['status'] === 'pending');
+
+// ---- 11. an insert that fails twice is logged, once an hour
+fresh();
+$wpdb->query('DROP TABLE wp_dfss_queue');
+file_put_contents($log = tempnam(sys_get_temp_dir(), 'dfss'), '');
+ini_set('error_log', $log);
+for ($i = 0; $i < 5; $i++) { queue('page_view', "lost$i"); }
+$lines = array_filter(explode("\n", trim((string) file_get_contents($log))));
+t('a lost event is logged, once whatever the number of requests', count($lines) === 1 && strpos($lines[0], 'insert failed') !== false);
+unlink($log);
+
+// ---- 12. expired count for the panel
+fresh();
+queue('page_view', 'x1', $now - 9 * 86400);
+queue('page_view', 'x2', $now - 9 * 86400);
+queue('page_view', 'x3', $now);
+run(new FakeClient());
+t('count_expired counts the expired rows listed', DFSS_Queue::count_expired() === 2);
+t('the last run remembers how many it expired', DFSS_Queue::last_run()['expired'] === 2);
+
+// ---- 13. timeouts: checkout path 4 s, browser relay 8 s with the connect wait kept at 4
+$GLOBALS['posted'] = array();
+$GLOBALS['hooks'] = array();
+$GLOBALS['hooks_at_post'] = array();
+$client = new DFSS_Client('t', 's', 'https://x/v1/events');
+$client->send(array('eventName' => 'purchase', 'eventId' => 'o1'));
+t('the checkout path keeps its 4 s timeout', $GLOBALS['posted'][0]['timeout'] === 4);
+t('and does not touch the connect timeout', empty($GLOBALS['hooks']['http_api_curl']));
+$client->send(array('eventName' => 'page_view', 'eventId' => 'b1'), 8);
+t('the beacon relay waits up to 8 s in total', $GLOBALS['posted'][1]['timeout'] === 8);
+t('the connect wait is capped separately during the 8 s request and the cap is removed afterwards', $GLOBALS['hooks_at_post'] === array(0, 1) && empty($GLOBALS['hooks']['http_api_curl']));
+$rest = file_get_contents(__DIR__ . '/../includes/class-dfss-rest.php');
+$main = file_get_contents(__DIR__ . '/../datafirefly-server-side.php');
+t('the REST relay passes its own timeout, 8 s', strpos($rest, "const RELAY_TIMEOUT = 8;") !== false && strpos($rest, '->send($payload, self::RELAY_TIMEOUT)') !== false);
+t('no order or checkout hook passes a timeout', preg_match('/->send\(\$payload, /', $main) === 0);
+$unin = file_get_contents(__DIR__ . '/../uninstall.php');
+t('uninstall removes the last-run option and the schema transient', strpos($unin, "'dfss_queue_last_run'") !== false && strpos($unin, "delete_transient('dfss_queue_schema_notice')") !== false);
 
 echo "\n$ok passed, $fail failed\n";
 exit($fail ? 1 : 0);

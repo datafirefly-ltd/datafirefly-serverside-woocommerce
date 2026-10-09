@@ -67,9 +67,12 @@ Yes. When "Require consent" is on (default), no tag is injected and no event is 
 = 2.30.0 =
 * Improved: events that failed to send are retried purchases and refunds first, then the most recent ones. Until now the oldest came first, so after a long outage a sale could wait behind thousands of old page views.
 * New: a queued event older than 7 days is marked Expired and is not sent (no platform accepts it any more). It stays listed in the Activity panel until the usual clean-up, never silently deleted.
+* Note: a purchase that is sent for the first time more than 7 days after its order date expires without being sent, because the platforms' attribution windows are shorter than that.
 * Improved: each retry run works within a 20 second budget and 200 events, and stops sending after a network failure, a server error or a rate limit instead of trying every remaining event against a dispatcher that is down.
 * New: every signed request to the dispatcher now carries the number of queued events and the age of the oldest one, so a shop whose retries run late is visible.
 * Improved: the Activity panel shows when the retry queue last ran. WordPress runs retries from its scheduler every 5 minutes, but only when the site is visited: on a quiet shop, call wp-cron.php from a server cron job every 5 minutes.
+* Improved: events relayed from the visitor's browser now wait up to 8 seconds for the dispatcher instead of 4 (checkout and order events keep 4), so slow networks stop aborting them.
+* Improved: the Activity panel also shows how many events the last retry run expired, and how many expired events are listed.
 * Fix: an event is no longer lost if the queue table has not been updated yet when it is saved; the table is now also updated for a shop that is not connected.
 * New: the new messages are translated into French, German, Spanish, Italian, Dutch, Polish, Portuguese and Czech.
 

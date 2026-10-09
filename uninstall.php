@@ -10,9 +10,11 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
 global $wpdb;
 
 // Options (see DFSS_Plugin::OPTION / PUBLIC_OPTION, maybe_upgrade(), DFSS_Truth::LAST_SENT_OPTION).
-foreach (array('dfss_settings', 'dfss_public_config', 'dfss_version', 'dfss_truth_last_date') as $dfss_option) {
+foreach (array('dfss_settings', 'dfss_public_config', 'dfss_version', 'dfss_truth_last_date', 'dfss_queue_last_run') as $dfss_option) {
     delete_option($dfss_option);
 }
+
+delete_transient('dfss_queue_schema_notice');
 
 // Cron hooks (DFSS_Queue::CRON_HOOK, DFSS_Truth::CRON_HOOK).
 wp_clear_scheduled_hook('dfss_retry');

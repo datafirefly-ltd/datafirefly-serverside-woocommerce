@@ -10,6 +10,9 @@ class DFSS_REST
 {
     const REST_NAMESPACE = 'dfss/v1';
     const ROUTE = '/collect';
+    // Total HTTP timeout (seconds) of a storefront event relayed to the dispatcher: the visitor has
+    // already left the request, so a slow shop-to-dispatcher network may take longer than the checkout.
+    const RELAY_TIMEOUT = 8;
 
     // Hard caps to keep hostile payloads cheap to reject.
     const MAX_BODY_BYTES = 16384;     // one event
@@ -225,7 +228,7 @@ class DFSS_REST
             return 'unmappable';
         }
 
-        $result = $context['client']->send($payload);
+        $result = $context['client']->send($payload, self::RELAY_TIMEOUT);
         DFSS_Queue::record_attempt($payload, $result, 'beacon');
 
         return !empty($result['ok']) ? true : false;
