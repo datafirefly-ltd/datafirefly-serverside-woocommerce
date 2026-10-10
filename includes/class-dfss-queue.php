@@ -417,7 +417,7 @@ class DFSS_Queue
      */
     private static function report($client, array $stats)
     {
-        if ($stats['sent'] + $stats['expired'] + $stats['dropped'] === 0) {
+        if ((int) $stats['sent'] + (int) $stats['expired'] + (int) $stats['dropped'] === 0) {
             return;
         }
         // The run stopped because the dispatcher did not answer at all: a heartbeat would wait the

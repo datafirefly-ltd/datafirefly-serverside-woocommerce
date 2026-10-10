@@ -380,7 +380,7 @@ class DFSS_Consent
         if (((ord($bits[0]) >> 2) & 0x3F) !== 2) {
             return null;
         }
-        $bit = function ($n) use ($bits) {
+        $bit = function (int $n) use ($bits) {
             return (ord($bits[(int) floor($n / 8)]) >> (7 - ($n % 8))) & 1;
         };
 
