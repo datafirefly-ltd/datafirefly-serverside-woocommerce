@@ -364,18 +364,21 @@ class DFSS_Queue
                 self::update_status((int) $row->id, self::STATUS_DONE, $attempts, 0, $code, '');
                 ++$stats['delivered'];
                 delete_transient(self::BREAKER_TRANSIENT);
+                self::note_gads($payload, $result, self::STATUS_DONE);
                 continue;
             }
 
             if (self::is_non_retryable($code)) {
                 self::update_status((int) $row->id, self::STATUS_FAILED, $attempts, 0, $code, self::clip($result));
                 ++$stats['failed'];
+                self::note_gads($payload, $result, self::STATUS_FAILED);
                 continue;
             }
 
             if ($attempts >= self::MAX_ATTEMPTS) {
                 self::update_status((int) $row->id, self::STATUS_DROPPED, $attempts, 0, $code, self::clip($result));
                 ++$stats['dropped'];
+                self::note_gads($payload, $result, self::STATUS_DROPPED);
             } else {
                 // Still retryable, back off further.
                 self::update_status(
@@ -387,6 +390,7 @@ class DFSS_Queue
                     self::clip($result)
                 );
                 ++$stats['retry'];
+                self::note_gads($payload, $result, self::STATUS_PENDING);
             }
 
             // The dispatcher or the network is struggling: the next row would fail the same way.
@@ -888,6 +892,22 @@ class DFSS_Queue
      *
      * @return bool
      */
+    /**
+     * A replayed purchase went out, or was given up on: its line in the Google Ads conversion log
+     * says so (2.31.0). Guarded: this class does not load its neighbours, and a missing one must
+     * not stop the replay (the PrestaShop module 1.32.0 stopped on "Class not found").
+     *
+     * @param array  $payload
+     * @param array  $result
+     * @param string $settled
+     */
+    private static function note_gads(array $payload, array $result, $settled)
+    {
+        if (class_exists('DFSS_Gads_Log', false)) {
+            DFSS_Gads_Log::record_replay($payload, $result, $settled);
+        }
+    }
+
     private static function is_non_retryable($code)
     {
         return in_array((int) $code, array(401, 403), true);

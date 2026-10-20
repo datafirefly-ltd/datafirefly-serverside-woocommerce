@@ -412,3 +412,152 @@ msgstr ""
 #, php-format
 msgid "Expired: %1$d in the last run, %2$d listed"
 msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Expected in Google Ads"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Sent without consent (Google may ignore it)"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "No click ID (not sent to Google)"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Skipped by the dispatcher"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Refused by Google"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads not connected"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent refused (not sent)"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Waiting in the retry queue"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Delivery error"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Plan allowance used up"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Unknown"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "30 days"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Day"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Shop orders (paid)"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Seen by the plugin"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Expected value"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "No click ID"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "of which came from an ad"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent refused"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Sent without consent"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Errors / queued"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Yes"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "No"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "No order logged yet: the log starts with version 2.31.0."
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "\"Expected in Google Ads\" counts the purchases Google accepted with the shopper consent: that is the number Google Ads should show, by click date, 24 to 72 hours later, for clicks inside the conversion window. Days are by order date."
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "\"Of which came from an ad\": WooCommerce's own order attribution says the order came from Google with a paid medium (cpc, ppc, paid...). Read from the order, nothing new is stored about the visitor. WooCommerce sees the gclid of the landing page, not gbraid, wbraid or gad_source."
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "WooCommerce order attribution is turned off (WooCommerce > Settings > Advanced > Features): the \"of which came from an ad\" columns stay at 0."
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads conversion log"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Latest orders"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Date"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Order"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Amount"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Click ID"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Arrived from an ad"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Email"
+msgstr ""
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads"
+msgstr ""
+

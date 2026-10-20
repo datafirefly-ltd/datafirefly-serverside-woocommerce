@@ -361,6 +361,30 @@
 		}
 	}
 
+	// ---- the click id Google's own tag kept (2.31.0) ----------------------------
+	//
+	// Google's tag (gtag.js) writes its own cookie at the click: _gcl_aw for the gclid, _gcl_gb for
+	// the gbraid. Our _dfss_* cookies only exist since the plugin went live, and only if the id
+	// survived until the shopper accepted. A visitor who clicked an ad before that only has Google's;
+	// without it the purchase leaves without a click id and the dispatcher skips it for Google.
+	// A fallback only: ours first, Google's second. Reading creates nothing, and that cookie only
+	// exists if Google was allowed to write it. Same rule as the PrestaShop module 1.32.0.
+
+	// ---- DFSS_TEST_EXPORT_GCL_START (pure, tested by tests/test-gcl-cookie.mjs)
+	/**
+	 * The id inside a Google cookie (_gcl_aw, _gcl_gb), or ''. gtag writes "GCL.<timestamp>.<id>";
+	 * anything after the id (a "$i..." suffix on recent tags) is dropped, the dispatcher checks the length.
+	 */
+	function dfssGclCookieValue(raw) {
+		if (!raw || typeof raw !== 'string') {
+			return '';
+		}
+		var m = /^GCL\.\d+\.([A-Za-z0-9_-]+)/.exec(raw);
+
+		return m ? m[1] : '';
+	}
+	// ---- DFSS_TEST_EXPORT_GCL_END
+
 	// Read the browser identifiers we have available client-side.
 	function collectUserData() {
 		var u = {};
@@ -373,9 +397,10 @@
 		if (ttp) { u.ttp = ttp; }
 		var ttclid = getCookie('_dfss_ttclid');
 		if (ttclid) { u.ttclid = ttclid; }
-		var gclid = getCookie('_dfss_gclid');
+		// Ours first, Google's tag second (see dfssGclCookieValue).
+		var gclid = getCookie('_dfss_gclid') || dfssGclCookieValue(getCookie('_gcl_aw'));
 		if (gclid) { u.gclid = gclid; }
-		var gbraid = getCookie('_dfss_gbraid');
+		var gbraid = getCookie('_dfss_gbraid') || dfssGclCookieValue(getCookie('_gcl_gb'));
 		if (gbraid) { u.gbraid = gbraid; }
 		var wbraid = getCookie('_dfss_wbraid');
 		if (wbraid) { u.wbraid = wbraid; }

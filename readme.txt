@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.30.0
+Stable tag: 2.31.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,12 @@ The core tracker is about 10 KB compressed, loaded deferred in the footer. Each 
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.31.0 =
+* New: a Google Ads conversion log on the Activity page. For each order it says what Google Ads should show and, when it will not, why: no click ID (organic, direct, other channels), consent refused, sent without consent, waiting in the retry queue, refused by Google, Google Ads not connected, plan allowance used up. Per day over 30 days, next to the shop's paid orders, and for the latest 50 orders. Read from the dispatcher's own answer, which until now only appeared as "delivered".
+* New: "of which came from an ad" counts, among the orders without click ID and the refusals, those WooCommerce's own order attribution assigns to Google with a paid medium. Nothing new is stored about the visitor; when WooCommerce order attribution is off, the panel says so.
+* Improved: when the plugin's own click ID cookie is missing, the gclid or gbraid is taken from the cookie Google's tag wrote itself at the click (_gcl_aw, _gcl_gb), in the browser and at checkout. Ours first, Google's second; that cookie only exists if Google was allowed to write it.
+* New: the new messages are translated into French, German, Spanish, Italian, Dutch, Polish, Portuguese and Czech.
 
 = 2.30.0 =
 * Improved: events that failed to send are retried purchases and refunds first, then the most recent ones. Until now the oldest came first, so after a long outage a sale could wait behind thousands of old page views.
@@ -175,6 +181,9 @@ Yes. When "Require consent" is on (default), no tag is injected and no event is 
 * Server-side purchase event delivery.
 
 == Upgrade Notice ==
+
+= 2.31.0 =
+Adds the Google Ads conversion log table (created automatically). No setting changes.
 
 = 2.30.0 =
 The retry queue table gets two columns on upgrade (done automatically). Events queued for more than 7 days are no longer sent. No setting changes.

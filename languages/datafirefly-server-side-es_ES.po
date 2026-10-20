@@ -414,3 +414,151 @@ msgstr "El planificador de WordPress reintenta los eventos fallidos cada 5 minut
 #, php-format
 msgid "Expired: %1$d in the last run, %2$d listed"
 msgstr "Caducados: %1$d en el último reintento, %2$d listados"
+
+#: includes/class-dfss-gads-log.php
+msgid "Expected in Google Ads"
+msgstr "Esperadas en Google Ads"
+
+#: includes/class-dfss-gads-log.php
+msgid "Sent without consent (Google may ignore it)"
+msgstr "Enviada sin consentimiento (Google puede ignorarla)"
+
+#: includes/class-dfss-gads-log.php
+msgid "No click ID (not sent to Google)"
+msgstr "Sin identificador de clic (no enviada a Google)"
+
+#: includes/class-dfss-gads-log.php
+msgid "Skipped by the dispatcher"
+msgstr "Descartada por el dispatcher"
+
+#: includes/class-dfss-gads-log.php
+msgid "Refused by Google"
+msgstr "Rechazada por Google"
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads not connected"
+msgstr "Google Ads no conectado"
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent refused (not sent)"
+msgstr "Consentimiento rechazado (no enviada)"
+
+#: includes/class-dfss-gads-log.php
+msgid "Waiting in the retry queue"
+msgstr "En espera en la cola de reenvío"
+
+#: includes/class-dfss-gads-log.php
+msgid "Delivery error"
+msgstr "Error de envío"
+
+#: includes/class-dfss-gads-log.php
+msgid "Plan allowance used up"
+msgstr "Cuota del plan agotada"
+
+#: includes/class-dfss-gads-log.php
+msgid "Unknown"
+msgstr "Desconocido"
+
+#: includes/class-dfss-gads-log.php
+msgid "30 days"
+msgstr "30 días"
+
+#: includes/class-dfss-gads-log.php
+msgid "Day"
+msgstr "Día"
+
+#: includes/class-dfss-gads-log.php
+msgid "Shop orders (paid)"
+msgstr "Pedidos de la tienda (pagados)"
+
+#: includes/class-dfss-gads-log.php
+msgid "Seen by the plugin"
+msgstr "Vistos por el plugin"
+
+#: includes/class-dfss-gads-log.php
+msgid "Expected value"
+msgstr "Valor esperado"
+
+#: includes/class-dfss-gads-log.php
+msgid "No click ID"
+msgstr "Sin identificador de clic"
+
+#: includes/class-dfss-gads-log.php
+msgid "of which came from an ad"
+msgstr "de ellos, por un anuncio"
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent refused"
+msgstr "Consentimiento rechazado"
+
+#: includes/class-dfss-gads-log.php
+msgid "Sent without consent"
+msgstr "Enviadas sin consentimiento"
+
+#: includes/class-dfss-gads-log.php
+msgid "Errors / queued"
+msgstr "Errores / en cola"
+
+#: includes/class-dfss-gads-log.php
+msgid "Yes"
+msgstr "Sí"
+
+#: includes/class-dfss-gads-log.php
+msgid "No"
+msgstr "No"
+
+#: includes/class-dfss-gads-log.php
+msgid "No order logged yet: the log starts with version 2.31.0."
+msgstr "Aún no hay ningún pedido registrado: el registro empieza con la versión 2.31.0."
+
+#: includes/class-dfss-gads-log.php
+msgid "\"Expected in Google Ads\" counts the purchases Google accepted with the shopper consent: that is the number Google Ads should show, by click date, 24 to 72 hours later, for clicks inside the conversion window. Days are by order date."
+msgstr "«Esperadas en Google Ads» cuenta las compras que Google aceptó con el consentimiento del cliente: es la cifra que Google Ads debería mostrar, por fecha de clic, entre 24 y 72 horas después, para los clics dentro de la ventana de conversión. Los días son los del pedido."
+
+#: includes/class-dfss-gads-log.php
+msgid "\"Of which came from an ad\": WooCommerce's own order attribution says the order came from Google with a paid medium (cpc, ppc, paid...). Read from the order, nothing new is stored about the visitor. WooCommerce sees the gclid of the landing page, not gbraid, wbraid or gad_source."
+msgstr "«de ellos, por un anuncio»: la atribución de pedidos de WooCommerce indica que el pedido vino de Google con un medio publicitario de pago (cpc, ppc, paid…). Se lee en el pedido; no se guarda nada nuevo sobre el visitante. WooCommerce ve el gclid de la página de llegada, no gbraid, wbraid ni gad_source."
+
+#: includes/class-dfss-gads-log.php
+msgid "WooCommerce order attribution is turned off (WooCommerce > Settings > Advanced > Features): the \"of which came from an ad\" columns stay at 0."
+msgstr "La atribución de pedidos de WooCommerce está desactivada (WooCommerce > Ajustes > Avanzado > Características): las columnas «de ellos, por un anuncio» se quedan en 0."
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads conversion log"
+msgstr "Registro de conversiones de Google Ads"
+
+#: includes/class-dfss-gads-log.php
+msgid "Latest orders"
+msgstr "Últimos pedidos"
+
+#: includes/class-dfss-gads-log.php
+msgid "Date"
+msgstr "Fecha"
+
+#: includes/class-dfss-gads-log.php
+msgid "Order"
+msgstr "Pedido"
+
+#: includes/class-dfss-gads-log.php
+msgid "Amount"
+msgstr "Importe"
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent"
+msgstr "Consentimiento"
+
+#: includes/class-dfss-gads-log.php
+msgid "Click ID"
+msgstr "Identificador de clic"
+
+#: includes/class-dfss-gads-log.php
+msgid "Arrived from an ad"
+msgstr "Llegó por un anuncio"
+
+#: includes/class-dfss-gads-log.php
+msgid "Email"
+msgstr "Correo electrónico"
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads"
+msgstr "Google Ads"

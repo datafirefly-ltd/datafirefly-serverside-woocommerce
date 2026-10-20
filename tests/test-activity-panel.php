@@ -30,6 +30,7 @@ function esc_attr($s) { return htmlspecialchars((string) $s); }
 function human_time_diff($a, $b) { return '5 mins'; }
 function wp_date($f, $t) { return gmdate($f, $t); }
 function wp_json_encode($v, $f = 0) { return json_encode($v, $f); }
+function number_format_i18n($n, $d = 0) { return number_format((float) $n, $d); }
 
 class FakeWpdb2
 {
@@ -70,11 +71,39 @@ foreach (array('table', 'thead', 'tbody', 'tr', 'th', 'div', 'p') as $tag) {
 t('the last retry run is shown', strpos($html, 'Last retry run: 5 mins ago') !== false);
 t('expired counts are shown: last run and listed', strpos($html, 'Expired: 4 in the last run, 3 listed') !== false);
 t('the expired status has its label', strpos($html, '>Expired</strong>') !== false);
+t('the Google Ads conversion log follows the activity table (2.31.0)', strpos($html, '<h2 style="margin-top:32px;">Google Ads conversion log</h2>') > strpos($html, 'id="dfss-activity-rows"'));
+t('the log lists thirty days and a 30-day total', substr_count($html, '<tr><td>' . gmdate('Y')) >= 30 && strpos($html, '<th>30 days</th>') !== false);
 $GLOBALS['options'] = array();
 ob_start();
 $plugin->render_activity();
 $html = ob_get_clean();
 t('no retry run yet is said so', strpos($html, 'No retry run yet') !== false);
+
+// ---- checkout: Google's own click id cookie as a fallback (2.31.0)
+function sanitize_text_field($s) { return trim(strip_tags((string) $s)); }
+function wp_unslash($s) { return $s; }
+class CheckoutOrder
+{
+    public $meta = array();
+    public function update_meta_data($k, $v) { $this->meta[$k] = $v; }
+    public function get_meta($k) { return isset($this->meta[$k]) ? $this->meta[$k] : ''; }
+}
+$checkout = function (array $cookies) use ($plugin) {
+    $_COOKIE = $cookies;
+    $o = new CheckoutOrder();
+    $plugin->capture_cookies($o, array());
+
+    return $o->meta;
+};
+$m = $checkout(array('_gcl_aw' => 'GCL.1760000000.Cj0KCQjwGOOGLE', '_gcl_gb' => 'GCL.1760000000.0AAAAgoogleB'));
+t('checkout: Google\'s _gcl_aw / _gcl_gb fill the click ids ours lack', ($m['_dfss_gclid'] ?? '') === 'Cj0KCQjwGOOGLE' && ($m['_dfss_gbraid'] ?? '') === '0AAAAgoogleB');
+$m = $checkout(array('_dfss_gclid' => 'OURS', '_gcl_aw' => 'GCL.1760000000.GOOGLE'));
+t('checkout: ours first, Google\'s never overrides it', ($m['_dfss_gclid'] ?? '') === 'OURS');
+$m = $checkout(array('_gcl_aw' => 'garbage'));
+t('checkout: an unreadable Google cookie stores nothing', !isset($m['_dfss_gclid']));
+$m = $checkout(array('_gcl_dc' => 'GCL.1760000000.X'));
+t('checkout: no Google cookie for wbraid, nothing invented', !isset($m['_dfss_wbraid']) && !isset($m['_dfss_gclid']));
+$_COOKIE = array();
 
 echo "\n$ok passed, $fail failed\n";
 exit($fail ? 1 : 0);

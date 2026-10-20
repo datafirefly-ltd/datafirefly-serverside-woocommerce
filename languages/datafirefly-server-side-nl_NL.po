@@ -414,3 +414,151 @@ msgstr "Mislukte gebeurtenissen worden elke 5 minuten opnieuw verstuurd door de 
 #, php-format
 msgid "Expired: %1$d in the last run, %2$d listed"
 msgstr "Verlopen: %1$d in de laatste run, %2$d vermeld"
+
+#: includes/class-dfss-gads-log.php
+msgid "Expected in Google Ads"
+msgstr "Verwacht in Google Ads"
+
+#: includes/class-dfss-gads-log.php
+msgid "Sent without consent (Google may ignore it)"
+msgstr "Verzonden zonder toestemming (Google kan ze negeren)"
+
+#: includes/class-dfss-gads-log.php
+msgid "No click ID (not sent to Google)"
+msgstr "Geen klik-ID (niet naar Google verzonden)"
+
+#: includes/class-dfss-gads-log.php
+msgid "Skipped by the dispatcher"
+msgstr "Overgeslagen door de dispatcher"
+
+#: includes/class-dfss-gads-log.php
+msgid "Refused by Google"
+msgstr "Geweigerd door Google"
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads not connected"
+msgstr "Google Ads niet gekoppeld"
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent refused (not sent)"
+msgstr "Toestemming geweigerd (niet verzonden)"
+
+#: includes/class-dfss-gads-log.php
+msgid "Waiting in the retry queue"
+msgstr "Wacht in de herhalingswachtrij"
+
+#: includes/class-dfss-gads-log.php
+msgid "Delivery error"
+msgstr "Verzendfout"
+
+#: includes/class-dfss-gads-log.php
+msgid "Plan allowance used up"
+msgstr "Tegoed van het abonnement opgebruikt"
+
+#: includes/class-dfss-gads-log.php
+msgid "Unknown"
+msgstr "Onbekend"
+
+#: includes/class-dfss-gads-log.php
+msgid "30 days"
+msgstr "30 dagen"
+
+#: includes/class-dfss-gads-log.php
+msgid "Day"
+msgstr "Dag"
+
+#: includes/class-dfss-gads-log.php
+msgid "Shop orders (paid)"
+msgstr "Winkelbestellingen (betaald)"
+
+#: includes/class-dfss-gads-log.php
+msgid "Seen by the plugin"
+msgstr "Gezien door de plugin"
+
+#: includes/class-dfss-gads-log.php
+msgid "Expected value"
+msgstr "Verwachte waarde"
+
+#: includes/class-dfss-gads-log.php
+msgid "No click ID"
+msgstr "Zonder klik-ID"
+
+#: includes/class-dfss-gads-log.php
+msgid "of which came from an ad"
+msgstr "waarvan via een advertentie"
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent refused"
+msgstr "Toestemming geweigerd"
+
+#: includes/class-dfss-gads-log.php
+msgid "Sent without consent"
+msgstr "Verzonden zonder toestemming"
+
+#: includes/class-dfss-gads-log.php
+msgid "Errors / queued"
+msgstr "Fouten / in wachtrij"
+
+#: includes/class-dfss-gads-log.php
+msgid "Yes"
+msgstr "Ja"
+
+#: includes/class-dfss-gads-log.php
+msgid "No"
+msgstr "Nee"
+
+#: includes/class-dfss-gads-log.php
+msgid "No order logged yet: the log starts with version 2.31.0."
+msgstr "Nog geen bestelling gelogd: het logboek begint bij versie 2.31.0."
+
+#: includes/class-dfss-gads-log.php
+msgid "\"Expected in Google Ads\" counts the purchases Google accepted with the shopper consent: that is the number Google Ads should show, by click date, 24 to 72 hours later, for clicks inside the conversion window. Days are by order date."
+msgstr "‘Verwacht in Google Ads’ telt de aankopen die Google met toestemming van de klant heeft geaccepteerd: dat is het aantal dat Google Ads 24 tot 72 uur later zou moeten tonen, per klikdatum, voor klikken binnen het conversievenster. De dagen zijn die van de bestelling."
+
+#: includes/class-dfss-gads-log.php
+msgid "\"Of which came from an ad\": WooCommerce's own order attribution says the order came from Google with a paid medium (cpc, ppc, paid...). Read from the order, nothing new is stored about the visitor. WooCommerce sees the gclid of the landing page, not gbraid, wbraid or gad_source."
+msgstr "‘waarvan via een advertentie’: de eigen bestelattributie van WooCommerce geeft aan dat de bestelling van Google kwam met een betaald medium (cpc, ppc, paid…). Uit de bestelling gelezen; over de bezoeker wordt niets nieuws opgeslagen. WooCommerce ziet de gclid van de landingspagina, niet gbraid, wbraid of gad_source."
+
+#: includes/class-dfss-gads-log.php
+msgid "WooCommerce order attribution is turned off (WooCommerce > Settings > Advanced > Features): the \"of which came from an ad\" columns stay at 0."
+msgstr "De bestelattributie van WooCommerce staat uit (WooCommerce > Instellingen > Geavanceerd > Functies): de kolommen ‘waarvan via een advertentie’ blijven op 0."
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads conversion log"
+msgstr "Logboek van Google Ads-conversies"
+
+#: includes/class-dfss-gads-log.php
+msgid "Latest orders"
+msgstr "Laatste bestellingen"
+
+#: includes/class-dfss-gads-log.php
+msgid "Date"
+msgstr "Datum"
+
+#: includes/class-dfss-gads-log.php
+msgid "Order"
+msgstr "Bestelling"
+
+#: includes/class-dfss-gads-log.php
+msgid "Amount"
+msgstr "Bedrag"
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent"
+msgstr "Toestemming"
+
+#: includes/class-dfss-gads-log.php
+msgid "Click ID"
+msgstr "Klik-ID"
+
+#: includes/class-dfss-gads-log.php
+msgid "Arrived from an ad"
+msgstr "Via een advertentie gekomen"
+
+#: includes/class-dfss-gads-log.php
+msgid "Email"
+msgstr "E-mail"
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads"
+msgstr "Google Ads"

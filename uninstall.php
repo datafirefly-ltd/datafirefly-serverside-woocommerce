@@ -31,5 +31,8 @@ $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, Word
     )
 );
 
+// Google Ads conversion log table (DFSS_Gads_Log::table(), 2.31.0).
+$wpdb->query("DROP TABLE IF EXISTS {$wpdb->prefix}dfss_gads_log"); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table, name built from $wpdb->prefix only; dropping it is the point of uninstall.
+
 // Retry queue table (DFSS_Queue::table()).
 $wpdb->query("DROP TABLE IF EXISTS {$wpdb->prefix}dfss_queue"); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- custom plugin table, name built from $wpdb->prefix only; dropping it is the point of uninstall.

@@ -414,3 +414,151 @@ msgstr "Neúspěšné události plánovač WordPressu opakuje každých 5 minut,
 #, php-format
 msgid "Expired: %1$d in the last run, %2$d listed"
 msgstr "Vypršelo: %1$d při posledním běhu, %2$d uvedeno"
+
+#: includes/class-dfss-gads-log.php
+msgid "Expected in Google Ads"
+msgstr "Očekávané v Google Ads"
+
+#: includes/class-dfss-gads-log.php
+msgid "Sent without consent (Google may ignore it)"
+msgstr "Odesláno bez souhlasu (Google to může ignorovat)"
+
+#: includes/class-dfss-gads-log.php
+msgid "No click ID (not sent to Google)"
+msgstr "Bez identifikátoru kliknutí (neodesláno do Googlu)"
+
+#: includes/class-dfss-gads-log.php
+msgid "Skipped by the dispatcher"
+msgstr "Přeskočeno dispatcherem"
+
+#: includes/class-dfss-gads-log.php
+msgid "Refused by Google"
+msgstr "Odmítnuto Googlem"
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads not connected"
+msgstr "Google Ads není připojeno"
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent refused (not sent)"
+msgstr "Souhlas odmítnut (neodesláno)"
+
+#: includes/class-dfss-gads-log.php
+msgid "Waiting in the retry queue"
+msgstr "Čeká ve frontě opakovaného odeslání"
+
+#: includes/class-dfss-gads-log.php
+msgid "Delivery error"
+msgstr "Chyba odeslání"
+
+#: includes/class-dfss-gads-log.php
+msgid "Plan allowance used up"
+msgstr "Limit tarifu vyčerpán"
+
+#: includes/class-dfss-gads-log.php
+msgid "Unknown"
+msgstr "Neznámé"
+
+#: includes/class-dfss-gads-log.php
+msgid "30 days"
+msgstr "30 dní"
+
+#: includes/class-dfss-gads-log.php
+msgid "Day"
+msgstr "Den"
+
+#: includes/class-dfss-gads-log.php
+msgid "Shop orders (paid)"
+msgstr "Objednávky obchodu (zaplacené)"
+
+#: includes/class-dfss-gads-log.php
+msgid "Seen by the plugin"
+msgstr "Zaznamenané pluginem"
+
+#: includes/class-dfss-gads-log.php
+msgid "Expected value"
+msgstr "Očekávaná hodnota"
+
+#: includes/class-dfss-gads-log.php
+msgid "No click ID"
+msgstr "Bez identifikátoru kliknutí"
+
+#: includes/class-dfss-gads-log.php
+msgid "of which came from an ad"
+msgstr "z toho z reklamy"
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent refused"
+msgstr "Souhlas odmítnut"
+
+#: includes/class-dfss-gads-log.php
+msgid "Sent without consent"
+msgstr "Odeslané bez souhlasu"
+
+#: includes/class-dfss-gads-log.php
+msgid "Errors / queued"
+msgstr "Chyby / ve frontě"
+
+#: includes/class-dfss-gads-log.php
+msgid "Yes"
+msgstr "Ano"
+
+#: includes/class-dfss-gads-log.php
+msgid "No"
+msgstr "Ne"
+
+#: includes/class-dfss-gads-log.php
+msgid "No order logged yet: the log starts with version 2.31.0."
+msgstr "Zatím nebyla zaznamenána žádná objednávka: protokol začíná verzí 2.31.0."
+
+#: includes/class-dfss-gads-log.php
+msgid "\"Expected in Google Ads\" counts the purchases Google accepted with the shopper consent: that is the number Google Ads should show, by click date, 24 to 72 hours later, for clicks inside the conversion window. Days are by order date."
+msgstr "„Očekávané v Google Ads“ počítá nákupy, které Google přijal se souhlasem zákazníka: tolik konverzí by měl Google Ads zobrazit podle data kliknutí za 24 až 72 hodin, u kliknutí v rámci konverzního okna. Dny odpovídají datu objednávky."
+
+#: includes/class-dfss-gads-log.php
+msgid "\"Of which came from an ad\": WooCommerce's own order attribution says the order came from Google with a paid medium (cpc, ppc, paid...). Read from the order, nothing new is stored about the visitor. WooCommerce sees the gclid of the landing page, not gbraid, wbraid or gad_source."
+msgstr "„z toho z reklamy“: vlastní atribuce objednávek WooCommerce uvádí, že objednávka přišla z Googlu přes placené médium (cpc, ppc, paid…). Čteno z objednávky, o návštěvníkovi se nic nového neukládá. WooCommerce vidí gclid vstupní stránky, ne gbraid, wbraid ani gad_source."
+
+#: includes/class-dfss-gads-log.php
+msgid "WooCommerce order attribution is turned off (WooCommerce > Settings > Advanced > Features): the \"of which came from an ad\" columns stay at 0."
+msgstr "Atribuce objednávek WooCommerce je vypnutá (WooCommerce > Nastavení > Pokročilé > Funkce): sloupce „z toho z reklamy“ zůstávají na 0."
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads conversion log"
+msgstr "Protokol konverzí Google Ads"
+
+#: includes/class-dfss-gads-log.php
+msgid "Latest orders"
+msgstr "Poslední objednávky"
+
+#: includes/class-dfss-gads-log.php
+msgid "Date"
+msgstr "Datum"
+
+#: includes/class-dfss-gads-log.php
+msgid "Order"
+msgstr "Objednávka"
+
+#: includes/class-dfss-gads-log.php
+msgid "Amount"
+msgstr "Částka"
+
+#: includes/class-dfss-gads-log.php
+msgid "Consent"
+msgstr "Souhlas"
+
+#: includes/class-dfss-gads-log.php
+msgid "Click ID"
+msgstr "Identifikátor kliknutí"
+
+#: includes/class-dfss-gads-log.php
+msgid "Arrived from an ad"
+msgstr "Přišel z reklamy"
+
+#: includes/class-dfss-gads-log.php
+msgid "Email"
+msgstr "E-mail"
+
+#: includes/class-dfss-gads-log.php
+msgid "Google Ads"
+msgstr "Google Ads"

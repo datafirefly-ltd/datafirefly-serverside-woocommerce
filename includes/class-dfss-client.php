@@ -33,7 +33,7 @@ class DFSS_Client
      *
      * @param array $payload IncomingEvent shape (see DFSS_Event_Builder)
      *
-     * @return array{ok:bool,code:int,message:string}
+     * @return array{ok:bool,code:int,message:string,body?:string}
      */
     public function send(array $payload)
     {
@@ -96,7 +96,7 @@ class DFSS_Client
      *
      * @param array $payload {date, orders, revenue, currency, refunds?, refundAmount?, timezone?}
      *
-     * @return array{ok: bool, code: int, message: string}
+     * @return array{ok: bool, code: int, message: string, body?: string}
      */
     public function send_truth(array $payload)
     {
@@ -188,7 +188,7 @@ class DFSS_Client
      * @param string $body Raw bytes: exactly what is signed and sent.
      * @param int    $timeout
      *
-     * @return array{ok:bool,code:int,message:string}
+     * @return array{ok:bool,code:int,message:string,body?:string}
      */
     private function request($url, $body, $timeout = 4)
     {
@@ -234,11 +234,15 @@ class DFSS_Client
         }
 
         $code = (int) wp_remote_retrieve_response_code($response);
+        $answer = (string) wp_remote_retrieve_body($response);
 
         return array(
             'ok' => ($code >= 200 && $code < 300),
             'code' => $code,
-            'message' => substr((string) wp_remote_retrieve_body($response), 0, 500),
+            'message' => substr($answer, 0, 500),
+            // The whole answer, for readers that need more than a log line of it: DFSS_Gads_Log
+            // reads what each destination did with the event (2.31.0).
+            'body' => substr($answer, 0, 20000),
         );
     }
 }

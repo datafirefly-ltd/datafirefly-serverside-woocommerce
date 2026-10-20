@@ -633,5 +633,31 @@ $main = file_get_contents(__DIR__ . '/../datafirefly-server-side.php');
 t('the beacon relay and the three order hooks go through the breaker', strpos($rest, 'DFSS_Queue::send_direct(') !== false && substr_count($main, 'DFSS_Queue::send_direct($client, $payload)') === 3);
 t('the connection test still really sends', substr_count($main, '$result = $client->send($payload);') === 1);
 
+// ---- Google Ads conversion log (2.31.0): every outcome of a replay reaches the log
+// Everything above ran without DFSS_Gads_Log: the guard lets the replay run when the class is
+// absent (the PrestaShop module 1.32.0 stopped on "Class not found"). From here a spy stands in.
+class DFSS_Gads_Log
+{
+    public static $calls = array();
+    public static function record_replay(array $payload, array $result, $settled)
+    {
+        self::$calls[$payload['eventId']] = array($settled, (int) $result['code']);
+    }
+}
+// One replay per outcome: a 5xx stops the run on purpose (the next row would fail the same way).
+foreach (array('g-ok' => 200, 'g-401' => 401, 'g-503' => 503, 'g-last' => 500) as $id => $code) {
+    fresh();
+    queue('purchase', $id, $now - 60);
+    if ($id === 'g-last') {
+        $wpdb->query("UPDATE wp_dfss_queue SET attempts = " . (DFSS_Queue::MAX_ATTEMPTS - 1) . " WHERE event_id = 'g-last'");
+    }
+    run(new FakeClient(array($id => $code)));
+}
+$got = DFSS_Gads_Log::$calls;
+t('the log hears of a delivered replay (done)', ($got['g-ok'] ?? null) === array('done', 200));
+t('of a 401 (failed)', ($got['g-401'] ?? null) === array('failed', 401));
+t('of a replay still failing (pending)', ($got['g-503'] ?? null) === array('pending', 503));
+t('of a row given up after the last attempt (dropped)', ($got['g-last'] ?? null) === array('dropped', 500));
+
 echo "\n$ok passed, $fail failed\n";
 exit($fail ? 1 : 0);

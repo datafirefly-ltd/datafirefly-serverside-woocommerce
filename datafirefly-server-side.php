@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.30.0
+ * Version:           2.31.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -33,7 +33,7 @@ if (defined('DFSS_VERSION')) {
     return;
 }
 
-define('DFSS_VERSION', '2.30.0');
+define('DFSS_VERSION', '2.31.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -43,6 +43,7 @@ require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-event-builder.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-consent.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-settings.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-queue.php';
+require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-gads-log.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-rest.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-truth.php';
 require_once DFSS_PLUGIN_DIR . 'includes/class-dfss-legacy.php';
@@ -142,6 +143,7 @@ class DFSS_Plugin
     public static function activate()
     {
         DFSS_Queue::install();
+        DFSS_Gads_Log::install();
         DFSS_Queue::schedule_cron();
         DFSS_Truth::schedule_cron();
     }
@@ -169,6 +171,8 @@ class DFSS_Plugin
         // The queue table is migrated on every version change, connected or not: rows may be waiting
         // from before a disconnection, and 2.30.0 adds the columns that order their replay.
         DFSS_Queue::install();
+        // 2.31.0: the Google Ads conversion log (Activity page).
+        DFSS_Gads_Log::install();
         $o = $this->opts();
         if (!empty($o['enabled']) && $o['tenant_id'] !== '' && $o['hmac_secret'] !== '') {
             $this->refresh_public_config($o);
@@ -344,6 +348,19 @@ class DFSS_Plugin
                 $order->update_meta_data($meta, sanitize_text_field(wp_unslash($_COOKIE[$cookie])));
             }
         }
+        // 2.31.0: the cookie Google's own tag keeps each click id in, when ours is missing. Our
+        // cookies only exist since the plugin went live, and only if the id survived until the
+        // shopper accepted; Google's tag writes its own at the click, and only when it is allowed to.
+        // Ours first, Google's second (same rule as the tracker and the PrestaShop module 1.32.0).
+        $google = array('_gcl_aw' => '_dfss_gclid', '_gcl_gb' => '_dfss_gbraid');
+        foreach ($google as $cookie => $meta) {
+            if (!empty($_COOKIE[$cookie]) && !$order->get_meta($meta)) {
+                $value = DFSS_Gads_Log::gcl_cookie_value(sanitize_text_field(wp_unslash($_COOKIE[$cookie])));
+                if ($value !== '') {
+                    $order->update_meta_data($meta, $value);
+                }
+            }
+        }
         // GA4 session cookie (_ga_<measurement id without G->) of OUR property only, so the
         // purchase joins the converting session instead of landing as "Unassigned".
         if (!$order->get_meta('_dfss_ga_session')) {
@@ -408,6 +425,9 @@ class DFSS_Plugin
 
             // Record for observability + queue retry on a retryable failure.
             DFSS_Queue::record_attempt($payload, $result, 'server');
+            // What Google Ads should now see for this order, read from the dispatcher's own answer
+            // (Activity page: Google Ads conversion log).
+            DFSS_Gads_Log::record_sent($order, $payload, $result);
 
             if (empty($result['ok'])) {
                 $order->add_order_note('DataFirefly: purchase event not delivered (HTTP ' . (int) $result['code'] . '). Queued for retry.');
@@ -1401,6 +1421,7 @@ class DFSS_Plugin
                 </tbody>
             </table>
             <p class="description" style="margin-top:8px;"><?php esc_html_e('Updates automatically every 30 seconds. The client side fires the browser pixel; the server side is the ad-blocker-proof delivery, and both share one event id for deduplication.', 'datafirefly-server-side'); ?></p>
+            <?php echo DFSS_Gads_Log::render_panel(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- every value is escaped inside render_panel(). ?>
         </div>
         <?php
     }
