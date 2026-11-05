@@ -10,7 +10,7 @@ set -euo pipefail
 DIR="${1:-$(cd "$(dirname "$0")" && pwd)}"
 TERSER="${TERSER:-npx --yes terser@5}"
 cd "$DIR/assets"
-for src in dfss-tracker dfss-engagement dfss-dest-meta dfss-dest-tiktok dfss-dest-openai; do
+for src in dfss-url-guard dfss-tracker dfss-engagement dfss-dest-meta dfss-dest-tiktok dfss-dest-openai; do
     $TERSER "$src.js" --compress --mangle --output "$src.min.js"
     printf '%s.min.js  %s bytes\n' "$src" "$(wc -c < "$src.min.js" | tr -d ' ')"
 done

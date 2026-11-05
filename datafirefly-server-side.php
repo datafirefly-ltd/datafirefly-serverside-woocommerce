@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.31.0
+ * Version:           2.31.1
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -33,7 +33,7 @@ if (defined('DFSS_VERSION')) {
     return;
 }
 
-define('DFSS_VERSION', '2.31.0');
+define('DFSS_VERSION', '2.31.1');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -532,7 +532,14 @@ class DFSS_Plugin
             return;
         }
         $o = $this->opts();
-        if (empty($o['enabled']) || empty($o['complete_tracking'])) {
+        if (empty($o['enabled'])) {
+            return;
+        }
+        // Above the "complete tracking" switch and outside the deferred footer on purpose: the Google
+        // tags can come from a consent plugin or a theme, and a tag that runs first has already sent
+        // the address.
+        wp_enqueue_script('dfss-url-guard', $this->asset_url('dfss-url-guard'), array(), DFSS_VERSION, array('in_footer' => false));
+        if (empty($o['complete_tracking'])) {
             return;
         }
 

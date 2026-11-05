@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.31.0
+Stable tag: 2.31.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,9 @@ The core tracker is about 10 KB compressed, loaded deferred in the footer. Each 
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.31.1 =
+* Fixed: Google tags no longer read an email address or a phone number in the page address or the referrer, with or without consent. The address they receive follows the same rules as the server path. Meta and TikTok pixels read the address themselves and are not covered.
 
 = 2.31.0 =
 * New: a Google Ads conversion log on the Activity page. For each order it says what Google Ads should show and, when it will not, why: no click ID (organic, direct, other channels), consent refused, sent without consent, waiting in the retry queue, refused by Google, Google Ads not connected, plan allowance used up. Per day over 30 days, next to the shop's paid orders, and for the latest 50 orders. Read from the dispatcher's own answer, which until now only appeared as "delivered".

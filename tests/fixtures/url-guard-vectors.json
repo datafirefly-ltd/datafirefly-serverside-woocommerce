@@ -1,0 +1,150 @@
+[
+ {
+  "url": "https://shop.test/",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/suivi-commande-invite?order_reference=ABC&email=jean%40exemple.fr",
+  "clean": "https://shop.test/suivi-commande-invite?order_reference=ABC"
+ },
+ {
+  "url": "https://shop.test/a?email=",
+  "clean": "https://shop.test/a"
+ },
+ {
+  "url": "https://shop.test/merci?EMAIL=jean@exemple.fr&gclid=EAIaIQobChMI8457123698",
+  "clean": "https://shop.test/merci?gclid=EAIaIQobChMI8457123698"
+ },
+ {
+  "url": "https://shop.test/compte/jean.dupont@exemple.fr/commandes?x=1",
+  "clean": "https://shop.test/compte/[redacted]?x=1"
+ },
+ {
+  "url": "https://shop.test/jean@exemple.fr",
+  "clean": "https://shop.test/[redacted]"
+ },
+ {
+  "url": "https://shop.test/rappel/+33612345678",
+  "clean": "https://shop.test/rappel/[redacted]"
+ },
+ {
+  "url": "https://shop.test/rappel/06%2012%2034%2056%2078",
+  "clean": "https://shop.test/rappel/[redacted]"
+ },
+ {
+  "url": "https://shop.test/p/2552-42840-compresses.html",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/x?_=1728561234567",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/x?gad_campaignid=21234567890&gad_source=1",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/x?utm_source=news&utm_campaign=12345678901",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/x?utm_term=jean@exemple.fr&utm_source=a",
+  "clean": "https://shop.test/x?utm_source=a"
+ },
+ {
+  "url": "https://shop.test/x?name=robe-longue&color=rouge",
+  "clean": "https://shop.test/x?color=rouge"
+ },
+ {
+  "url": "https://shop.test/x?mobile=1",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "https://shop.test/x?newsletter_email=a@b.fr&y=2",
+  "clean": "https://shop.test/x?y=2"
+ },
+ {
+  "url": "https://shop.test/x?customer[email]=a@b.fr",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "https://shop.test/x?customer%5Bemail%5D=a%40b.fr",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "https://shop.test/x?s=jean%40exemple.fr",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "https://shop.test/x?s=robe",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/x?tel=0612345678",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "https://shop.test/x?q=0612345678",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "https://shop.test/x?ref=06+12+34+56+78",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "https://shop.test/x?v=2%2540b.fr",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "https://user:secret@shop.test/x",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "https://shop.test/x#jean@exemple.fr",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/x#/12-taille-m",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/x?a=1#jean%40exemple.fr",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/x?password=abc",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "not a url",
+  "clean": null
+ },
+ {
+  "url": "not-a-url/jean@exemple.fr",
+  "clean": "[redacted]"
+ },
+ {
+  "url": "https://shop.test/x?a=1&&b=2",
+  "clean": "https://shop.test/x?a=1&b=2"
+ },
+ {
+  "url": "https://shop.test/x?=",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/x?phone=",
+  "clean": "https://shop.test/x"
+ },
+ {
+  "url": "https://shop.test/x?ean=3760123456789",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/%E0%A4%A?x=1",
+  "clean": null
+ },
+ {
+  "url": "https://shop.test/x?y=%E0%A4%A",
+  "clean": null
+ }
+]
