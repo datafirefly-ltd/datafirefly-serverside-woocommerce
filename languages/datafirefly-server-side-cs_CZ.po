@@ -562,3 +562,15 @@ msgstr "E-mail"
 #: includes/class-dfss-gads-log.php
 msgid "Google Ads"
 msgstr "Google Ads"
+
+#: datafirefly-server-side.php:1343
+msgid "Your team"
+msgstr "Váš tým"
+
+#: datafirefly-server-side.php:1345
+msgid "Do not measure signed-in administrators and shop managers"
+msgstr "Neměřit přihlášené administrátory a správce obchodu"
+
+#: datafirefly-server-side.php:1346
+msgid "Your own visits to the shop (checks, tests, searches) otherwise count as a customer's and reach the advertising platforms, which then look for more people like you. Signed out, a team member is measured like any visitor. Orders are always sent, whoever places them: to leave out test orders, use the test order rule in your DataFirefly client space."
+msgstr "Jinak se vaše vlastní návštěvy obchodu (kontroly, testy, vyhledávání) počítají jako návštěvy zákazníka a dostanou se k reklamním platformám, které pak hledají další lidi podobné vám. Odhlášený člen týmu je měřen jako kterýkoli jiný návštěvník. Objednávky se odesílají vždy, ať je zadá kdokoli: chcete-li vyloučit testovací objednávky, použijte pravidlo pro testovací objednávky ve svém klientském prostoru DataFirefly."

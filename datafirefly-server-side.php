@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.31.1
+ * Version:           2.32.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -33,7 +33,7 @@ if (defined('DFSS_VERSION')) {
     return;
 }
 
-define('DFSS_VERSION', '2.31.1');
+define('DFSS_VERSION', '2.32.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -446,11 +446,29 @@ class DFSS_Plugin
      * @param string  $user_login
      * @param WP_User $user
      */
+    /**
+     * Whether this user is a signed-in team member left out of the measurement
+     * (DFSS_Settings::is_excluded_staff). A visitor without an account is always measured.
+     *
+     * @param mixed $user WP_User or anything else.
+     * @param array $opts Plugin options.
+     *
+     * @return bool
+     */
+    public static function is_excluded_staff_user($user, array $opts)
+    {
+        if (!($user instanceof WP_User) || (int) $user->ID <= 0) {
+            return false;
+        }
+
+        return DFSS_Settings::is_excluded_staff((array) $user->roles, $opts);
+    }
+
     public function on_login($user_login, $user = null)
     {
         try {
             $opts = $this->opts();
-            if (empty($opts['enabled'])) {
+            if (empty($opts['enabled']) || self::is_excluded_staff_user($user, $opts)) {
                 return;
             }
             $verdict = DFSS_Consent::server_verdict($opts);
@@ -540,6 +558,11 @@ class DFSS_Plugin
         // the address.
         wp_enqueue_script('dfss-url-guard', $this->asset_url('dfss-url-guard'), array(), DFSS_VERSION, array('in_footer' => false));
         if (empty($o['complete_tracking'])) {
+            return;
+        }
+        // A signed-in team member is not measured: no tracker, so no browser tag either. The URL
+        // guard above stays, it protects the address and measures nothing.
+        if (self::is_excluded_staff_user(wp_get_current_user(), $o)) {
             return;
         }
 
@@ -1316,6 +1339,11 @@ class DFSS_Plugin
                                 <td>
                                     <label><input type="checkbox" name="dfss_mod_engagement" value="1" <?php checked(1, (int) $o['mod_engagement']); ?> /> <?php esc_html_e('Enabled', 'datafirefly-server-side'); ?></label>
                                     <p class="description"><?php esc_html_e('Detects clicks on email and phone links, booking links (Calendly...), social shares, free-trial links, newsletter sign-ups, job applications and tagged donate / store-locator buttons. Useful for content and service sites. A shop that does not need them can switch them off: the script is then not loaded. Lead forms, registration and the purchase funnel are not affected.', 'datafirefly-server-side'); ?></p>
+                                </td></tr>
+                            <tr><th scope="row"><?php esc_html_e('Your team', 'datafirefly-server-side'); ?></th>
+                                <td>
+                                    <label><input type="checkbox" name="dfss_exclude_staff" value="1" <?php checked(1, (int) $o['exclude_staff']); ?> /> <?php esc_html_e('Do not measure signed-in administrators and shop managers', 'datafirefly-server-side'); ?></label>
+                                    <p class="description"><?php esc_html_e('Your own visits to the shop (checks, tests, searches) otherwise count as a customer\'s and reach the advertising platforms, which then look for more people like you. Signed out, a team member is measured like any visitor. Orders are always sent, whoever places them: to leave out test orders, use the test order rule in your DataFirefly client space.', 'datafirefly-server-side'); ?></p>
                                 </td></tr>
         <?php
     }

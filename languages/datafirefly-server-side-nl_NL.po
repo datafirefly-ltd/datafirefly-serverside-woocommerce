@@ -562,3 +562,15 @@ msgstr "E-mail"
 #: includes/class-dfss-gads-log.php
 msgid "Google Ads"
 msgstr "Google Ads"
+
+#: datafirefly-server-side.php:1343
+msgid "Your team"
+msgstr "Uw team"
+
+#: datafirefly-server-side.php:1345
+msgid "Do not measure signed-in administrators and shop managers"
+msgstr "Ingelogde beheerders en winkelmanagers niet meten"
+
+#: datafirefly-server-side.php:1346
+msgid "Your own visits to the shop (checks, tests, searches) otherwise count as a customer's and reach the advertising platforms, which then look for more people like you. Signed out, a team member is measured like any visitor. Orders are always sent, whoever places them: to leave out test orders, use the test order rule in your DataFirefly client space."
+msgstr "Anders tellen uw eigen bezoeken aan de winkel (controles, tests, zoekopdrachten) als die van een klant en komen ze bij de advertentieplatforms terecht, die dan naar meer mensen zoals u zoeken. Uitgelogd wordt een teamlid gemeten zoals elke bezoeker. Bestellingen worden altijd verzonden, wie ze ook plaatst: gebruik de regel voor testbestellingen in uw DataFirefly-klantomgeving om testbestellingen uit te sluiten."

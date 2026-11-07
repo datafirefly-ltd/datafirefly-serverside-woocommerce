@@ -174,6 +174,14 @@ class DFSS_REST
             return new WP_REST_Response(array('ok' => false, 'reason' => 'no_consent'), 200);
         }
 
+        // A signed-in team member is not measured. The tracker is not even loaded for them; this
+        // catches a page served from a cache that had it. WordPress only knows the user here when
+        // the request carries a valid nonce, otherwise it is treated as a visitor. The tracker does
+        // not retry a refusal other than a stale nonce.
+        if (DFSS_Plugin::is_excluded_staff_user(wp_get_current_user(), $opts)) {
+            return new WP_REST_Response(array('ok' => false, 'reason' => 'staff'), 200);
+        }
+
         $context = array(
             'nonce_ok' => $this->nonce_is_valid($request),
             'ip' => $this->client_ip(),

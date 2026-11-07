@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.31.1
+Stable tag: 2.32.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,10 @@ The core tracker is about 10 KB compressed, loaded deferred in the footer. Each 
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.32.0 =
+* New: signed-in administrators and shop managers are no longer measured. Your own visits to the shop (checks, tests, searches, checkout starts) used to count as a customer's and reached GA4, Meta, Google Ads and the other platforms, which then optimise towards people like you. For them the tracker and the browser tags are not loaded, the collection endpoint refuses their events and their sign-in sends nothing. Signed out, a team member is measured like any visitor. Orders are always sent, whoever places them. On by default; can be switched off under "Your team".
+* New: this setting is translated into French, German, Spanish, Italian, Dutch, Polish, Portuguese and Czech.
 
 = 2.31.1 =
 * Fixed: Google tags no longer read an email address or a phone number in the page address or the referrer, with or without consent. The address they receive follows the same rules as the server path. Meta and TikTok pixels read the address themselves and are not covered.

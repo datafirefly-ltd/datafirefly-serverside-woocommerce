@@ -561,3 +561,15 @@ msgstr ""
 msgid "Google Ads"
 msgstr ""
 
+
+#: datafirefly-server-side.php:1343
+msgid "Your team"
+msgstr ""
+
+#: datafirefly-server-side.php:1345
+msgid "Do not measure signed-in administrators and shop managers"
+msgstr ""
+
+#: datafirefly-server-side.php:1346
+msgid "Your own visits to the shop (checks, tests, searches) otherwise count as a customer's and reach the advertising platforms, which then look for more people like you. Signed out, a team member is measured like any visitor. Orders are always sent, whoever places them: to leave out test orders, use the test order rule in your DataFirefly client space."
+msgstr ""

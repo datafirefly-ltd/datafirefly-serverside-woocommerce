@@ -36,13 +36,53 @@ class DFSS_Settings
     );
 
     /**
-     * Every destination and module enabled: the behaviour of a fresh install or an upgrade.
+     * Switches saved with the destination form that are neither a destination nor a module.
+     *
+     * exclude_staff: a signed-in team member (STAFF_ROLES) is not measured. On by default since
+     * 2.32.0: a merchant's own checks and tests otherwise reach the advertising platforms as if
+     * they were a customer's.
+     */
+    const FLAGS = array(
+        'exclude_staff' => 1,
+    );
+
+    /** Roles whose signed-in visits are not measured when exclude_staff is on. */
+    const STAFF_ROLES = array('administrator', 'shop_manager');
+
+    /**
+     * Every destination, module and switch enabled: the behaviour of a fresh install or an upgrade.
      *
      * @return array<string,int>
      */
     public static function defaults()
     {
-        return array_fill_keys(array_merge(array_keys(self::DESTINATIONS), array_keys(self::MODULES)), 1);
+        return array_merge(
+            array_fill_keys(array_merge(array_keys(self::DESTINATIONS), array_keys(self::MODULES)), 1),
+            self::FLAGS
+        );
+    }
+
+    /**
+     * Whether a signed-in user with these roles is a team member left out of the measurement.
+     * A missing setting reads as on, like a fresh install.
+     *
+     * @param array $roles The user's roles (WP_User::$roles).
+     * @param array $opts  Plugin options.
+     *
+     * @return bool
+     */
+    public static function is_excluded_staff(array $roles, array $opts)
+    {
+        if (isset($opts['exclude_staff']) && (int) $opts['exclude_staff'] === 0) {
+            return false;
+        }
+        foreach ($roles as $role) {
+            if (is_string($role) && in_array($role, self::STAFF_ROLES, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
