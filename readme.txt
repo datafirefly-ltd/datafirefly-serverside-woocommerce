@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.32.0
+Stable tag: 2.33.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,12 @@ The core tracker is about 10 KB compressed, loaded deferred in the footer. Each 
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.33.0 =
+* Fix: the steps a signed-in customer triggers with a click (add to cart, payment details) now arrive. On a customer's first interaction the tracker asked WordPress for a fresh security token without presenting the one it had, and received a visitor's token. WordPress then refused every later event from that customer before the plugin could see it, and the refusal was never retried. Orders were not affected (they are sent by the server), which is why a funnel could show purchases without an add to cart. The token is now asked with the current one, so the customer keeps their own.
+* Fix: an event WordPress refuses for its token is sent again: with a visitor's token when the page came out of a cache with a stale one, then with the customer's own token, obtained from WordPress itself, when the page carries a token that is not theirs. Page views on pages cached for longer than a token lives are recovered this way. Nothing is ever sent without a token on behalf of someone WordPress refused, so a signed-in team member is still never measured.
+* Fix: the checkout start is counted once per basket. It used to be sent on every load of the checkout page, and twice when the same basket was shown on the cart page then on the checkout page. A basket that changes, or a new order after a purchase, counts again.
+* New: payment details entered in a card field or through a wallet button (Apple Pay, Google Pay, Link) are now detected. These fields live in frames of the payment provider, whose clicks the page never sees, so an order paid with an express button never passed through this step.
 
 = 2.32.0 =
 * New: signed-in administrators and shop managers are no longer measured. Your own visits to the shop (checks, tests, searches, checkout starts) used to count as a customer's and reached GA4, Meta, Google Ads and the other platforms, which then optimise towards people like you. For them the tracker and the browser tags are not loaded, the collection endpoint refuses their events and their sign-in sends nothing. Signed out, a team member is measured like any visitor. Orders are always sent, whoever places them. On by default; can be switched off under "Your team".

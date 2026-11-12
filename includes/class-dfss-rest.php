@@ -48,7 +48,9 @@ class DFSS_REST
     public function register_routes()
     {
         // Fresh nonce for pages served from a full-page cache, whose baked-in nonce goes stale.
-        // Never cached; asked once, on the visitor's first interaction.
+        // Never cached; asked once, on the visitor's first interaction. The answer is the nonce of
+        // whoever WordPress recognises on THIS request: the tracker presents its current nonce, so
+        // a signed-in customer receives their own. Asked without one, WordPress sees a visitor.
         register_rest_route(
             self::REST_NAMESPACE,
             '/nonce',
@@ -74,8 +76,11 @@ class DFSS_REST
     /**
      * Permission gate: connected, complete tracking on, within the per-IP rate limit.
      *
-     * A missing or stale nonce is not rejected here (full-page caches would lose the funnel): it only
-     * withholds identity, and NONCE_REQUIRED_EVENTS are refused in the handler.
+     * A missing nonce is not rejected here (full-page caches would lose the funnel): it only withholds
+     * identity, and NONCE_REQUIRED_EVENTS are refused in the handler. A nonce that is NOT the
+     * visitor's (stale, or another person's) never reaches this point: WordPress core refuses the
+     * request first (403 rest_cookie_invalid_nonce). The tracker then asks for the right one and
+     * sends the event again (dfssTransport in assets/dfss-tracker.js).
      *
      * @param WP_REST_Request $request
      *
@@ -176,8 +181,9 @@ class DFSS_REST
 
         // A signed-in team member is not measured. The tracker is not even loaded for them; this
         // catches a page served from a cache that had it. WordPress only knows the user here when
-        // the request carries a valid nonce, otherwise it is treated as a visitor. The tracker does
-        // not retry a refusal other than a stale nonce.
+        // the request carries a valid nonce, otherwise it is treated as a visitor. The tracker never
+        // sends without a nonce on behalf of someone WordPress refused, and does not retry this
+        // refusal.
         if (DFSS_Plugin::is_excluded_staff_user(wp_get_current_user(), $opts)) {
             return new WP_REST_Response(array('ok' => false, 'reason' => 'staff'), 200);
         }

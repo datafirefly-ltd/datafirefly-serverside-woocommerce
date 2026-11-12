@@ -87,6 +87,7 @@ function esc_html__($s, $d = null) { return $s; }
 function esc_url_raw($s) { return $s; }
 function home_url($p = '') { return 'https://shop.test' . $p; }
 function rest_url($p = '') { return 'https://shop.test/wp-json/' . ltrim($p, '/'); }
+function admin_url($p = '', $scheme = 'admin') { return ('relative' === $scheme ? '' : 'https://shop.test') . '/wp-admin/' . ltrim($p, '/'); }
 function wp_create_nonce($a) { return 'nonce'; }
 function wp_verify_nonce($n, $a) { return false; }
 function is_admin() { return false; }
@@ -109,7 +110,7 @@ function get_current_user_id() { $u = wp_get_current_user(); return (int) $u->ID
 function get_userdata($id) { return wp_get_current_user(); }
 function is_email($e) { return true; }
 function wp_register_script($h) { return true; }
-function wp_localize_script($h, $n, $d) { return true; }
+function wp_localize_script($h, $n, $d) { $GLOBALS['localized'][$n] = $d; return true; }
 function wp_enqueue_script($h) { $GLOBALS['enqueued'][] = $h; }
 function wp_safe_remote_post($url, $args = array())
 {
@@ -167,6 +168,10 @@ foreach (array('customer' => $customer, 'visitor' => $visitor) as $who => $user)
 }
 plugin_with(array_merge($base, array('exclude_staff' => 0)), $admin)->enqueue_tracker();
 t('tracker: setting off, the administrator is measured again', in_array('dfss-tracker', $GLOBALS['enqueued'], true));
+// The tracker is told where WordPress itself hands a signed-in customer their token, on the same
+// origin whatever host the page was served from (www or not).
+t('tracker: it knows where a signed-in customer gets their own token',
+    ($GLOBALS['localized']['DFSS_CFG']['accountNonceUrl'] ?? '') === '/wp-admin/admin-ajax.php?action=rest-nonce');
 
 // 2. Sign-in event, read on the wire.
 plugin_with($base, $admin)->on_login('admin', $admin);

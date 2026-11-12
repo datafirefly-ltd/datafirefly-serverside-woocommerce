@@ -18,40 +18,31 @@
 	var CONSENT = CFG.consent || { required: true, cmp: '', hasWpConsentApi: false };
 	var EVENTS = CFG.events || {}; // server-provided context for this page (e.g. purchase)
 	var REST = CFG.restUrl || '';
-	var NONCE = CFG.nonce || '';
-	var NONCE_URL = CFG.nonceUrl || '';
 	var COOKIE_DAYS = 90;
 
 	// Google Consent Mode advanced, a merchant option (off by default). Logic lives in DFSS_CM.
 	var CM_ON = false;
 
-	var nonceRefreshed = false;
-	function refreshNonce(done) {
-		if (!NONCE_URL || typeof window.fetch !== 'function') {
-			if (done) { done(); }
-			return;
-		}
-		try {
-			fetch(NONCE_URL, { credentials: 'same-origin', cache: 'no-store' })
-				.then(function (r) { return r.json(); })
-				.then(function (j) {
-					if (j && typeof j.nonce === 'string' && j.nonce) {
-						NONCE = j.nonce;
-						nonceRefreshed = true;
-					}
-					if (done) { done(); }
-				})
-				.catch(function () { if (done) { done(); } });
-		} catch (e) {
-			if (done) { done(); }
-		}
-	}
+	// How events reach the endpoint and which token they carry: see dfssTransport() below.
+	var TRANSPORT = dfssTransport({
+		restUrl: REST,
+		nonce: CFG.nonce || '',
+		nonceUrl: CFG.nonceUrl || '',
+		accountNonceUrl: CFG.accountNonceUrl || '',
+		fetch: typeof window.fetch === 'function' ? function (url, init) { return window.fetch(url, init); } : null,
+		sendBeacon: navigator.sendBeacon ? function (url, payload) {
+			return navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
+		} : null
+	});
+
+	// Pages served from a full-page cache carry a token that may have gone stale: a fresh one is
+	// asked once, on the visitor's first interaction.
 	function armNonceRefresh() {
 		var fired = false;
 		function once() {
 			if (fired) { return; }
 			fired = true;
-			refreshNonce();
+			TRANSPORT.refresh();
 		}
 		['pointerdown', 'keydown', 'touchstart', 'scroll'].forEach(function (ev) {
 			try {
@@ -211,6 +202,267 @@
 		return payload;
 	}
 	// ---- DFSS_TEST_EXPORT_GADS_END
+
+	// ---- transport: which token an event carries, and what a refusal leads to ------
+
+	// ---- DFSS_TEST_EXPORT_TRANSPORT_START (tested by tests/test-transport.mjs)
+	/**
+	 * Sends events to the collection endpoint.
+	 *
+	 * WordPress checks the token before the plugin sees the request, against whoever the sign-in
+	 * cookie says the visitor is: a token that is not theirs is refused outright (HTTP 403,
+	 * rest_cookie_invalid_nonce) and the event is lost. Three rules follow.
+	 *
+	 *  - A fresh token is asked WITH the current one. That is how WordPress recognises a signed-in
+	 *    customer and hands back their own token; asked without it, the answer is a visitor's token,
+	 *    which WordPress then refuses for that customer on every later event.
+	 *  - A refusal is retried, first with a visitor's token (page served from a cache, token gone
+	 *    stale), then with the account's own token, handed out by WordPress itself (signed-in
+	 *    customer on a page that carries someone else's token).
+	 *  - Nothing is sent without a token on behalf of a visitor WordPress refused: a signed-in team
+	 *    member must never be measured as an anonymous visitor.
+	 *
+	 * @param {{restUrl:string, nonce:string, nonceUrl:string, accountNonceUrl:string,
+	 *          fetch:?function, sendBeacon:?function}} env
+	 */
+	function dfssTransport(env) {
+		var nonce = env.nonce || '';
+		var doFetch = typeof env.fetch === 'function' ? env.fetch : null;
+
+		// done(token, status): token '' when none came back.
+		function askToken(sendCurrent, done) {
+			var init = { credentials: 'same-origin', cache: 'no-store' };
+			if (sendCurrent && nonce) {
+				init.headers = { 'X-WP-Nonce': nonce };
+			}
+			var status = 0;
+			try {
+				doFetch(env.nonceUrl, init)
+					.then(function (r) {
+						status = r ? r.status : 0;
+						return r && r.ok ? r.json() : null;
+					})
+					.then(function (j) {
+						done(j && typeof j.nonce === 'string' ? j.nonce : '', status);
+					})
+					.catch(function () { done('', status); });
+			} catch (e) {
+				done('', 0);
+			}
+		}
+
+		// A fresh token for whoever WordPress recognises. visitorOnly: the current token has just
+		// been refused, asking with it again would only be refused again.
+		function refresh(done, visitorOnly) {
+			function finish(got) {
+				if (done) { done(got); }
+			}
+			if (!env.nonceUrl || !doFetch) {
+				finish(false);
+				return;
+			}
+			function asVisitor() {
+				askToken(false, function (token) {
+					if (token) { nonce = token; }
+					finish(!!token);
+				});
+			}
+			if (visitorOnly || !nonce) {
+				asVisitor();
+				return;
+			}
+			askToken(true, function (token, status) {
+				if (token) {
+					nonce = token;
+					finish(true);
+				} else if (status === 403) {
+					// The page's token is not this visitor's (stale, or baked for someone else).
+					asVisitor();
+				} else {
+					// Network trouble: the token at hand may still be the right one, keep it.
+					finish(false);
+				}
+			});
+		}
+
+		// The signed-in customer's own token, from WordPress core (admin-ajax "rest-nonce"). It
+		// answers to the sign-in cookie alone and only a page of the same site can read it; a
+		// visitor gets no token there.
+		function accountToken(done) {
+			if (!env.accountNonceUrl || !doFetch) {
+				done(false);
+				return;
+			}
+			try {
+				doFetch(env.accountNonceUrl, { credentials: 'same-origin', cache: 'no-store' })
+					.then(function (r) { return r && r.ok ? r.text() : ''; })
+					.then(function (text) {
+						var token = String(text || '').replace(/\s+/g, '');
+						if (/^[a-zA-Z0-9]{6,40}$/.test(token)) {
+							nonce = token;
+							done(true);
+						} else {
+							done(false);
+						}
+					})
+					.catch(function () { done(false); });
+			} catch (e) {
+				done(false);
+			}
+		}
+
+		// step 0: the token at hand. 1: after asking a visitor's token. 2: after the account's.
+		function post(payload, step) {
+			step = step || 0;
+			if (!doFetch) {
+				return;
+			}
+			var headers = { 'Content-Type': 'application/json' };
+			// An empty token is not sent: WordPress would refuse it instead of seeing a visitor.
+			if (nonce) {
+				headers['X-WP-Nonce'] = nonce;
+			}
+			function withAccount() {
+				accountToken(function (got) {
+					if (got) { post(payload, 2); }
+				});
+			}
+			try {
+				doFetch(env.restUrl, {
+					method: 'POST',
+					keepalive: true,
+					credentials: 'same-origin',
+					headers: headers,
+					body: payload
+				}).then(function (r) {
+					if (!r) {
+						return;
+					}
+					if (r.status === 403) {
+						if (step >= 2) {
+							return;
+						}
+						return r.json().then(function (j) {
+							// Only the token refusal: "tracking disabled" is a 403 too, and final.
+							if (!j || j.code !== 'rest_cookie_invalid_nonce') {
+								return;
+							}
+							if (step === 1) {
+								withAccount();
+								return;
+							}
+							refresh(function (got) {
+								if (got) {
+									post(payload, 1);
+								} else {
+									withAccount();
+								}
+							}, true);
+						}).catch(function () {});
+					}
+					if (step !== 0 || !r.ok) {
+						return;
+					}
+					// The plugin's own answer: an event that needs a token arrived without a valid one.
+					return r.json().then(function (j) {
+						if (j && j.ok === false && j.reason === 'nonce') {
+							refresh(function () { post(payload, 1); });
+						}
+					}).catch(function () {});
+				}).catch(function () {});
+			} catch (e) {}
+		}
+
+		// sendBeacon survives the page leaving, but its answer cannot be read: no retry here.
+		function beaconNow(payload) {
+			if (typeof env.sendBeacon !== 'function') {
+				return false;
+			}
+			try {
+				var url = env.restUrl;
+				if (nonce) {
+					url += (url.indexOf('?') === -1 ? '?' : '&') + '_wpnonce=' + encodeURIComponent(nonce);
+				}
+				return !!env.sendBeacon(url, payload);
+			} catch (e) {
+				return false;
+			}
+		}
+
+		return {
+			post: function (payload) { post(payload, 0); },
+			beaconNow: beaconNow,
+			refresh: function (done) { refresh(done, false); },
+			token: function () { return nonce; }
+		};
+	}
+	// ---- DFSS_TEST_EXPORT_TRANSPORT_END
+
+	// ---- funnel steps counted once, and payment entered in a frame -----------------
+
+	// ---- DFSS_TEST_EXPORT_FUNNEL_START (pure, tested by tests/test-funnel-steps.mjs)
+	/**
+	 * What identifies a checkout: its lines and its total. The same basket reloaded, or shown on a
+	 * second page, is the same checkout; a basket that changed is a new one.
+	 *
+	 * @param {{products:?Array, value:*, currency:*}} checkout
+	 */
+	function dfssCheckoutSignature(checkout) {
+		var c = checkout || {};
+		var lines = (c.products || []).map(function (p) {
+			return String(p && p.id) + 'x' + String(p && p.quantity);
+		}).sort();
+
+		return lines.join(',') + '|' + String(c.value) + '|' + String(c.currency || '');
+	}
+
+	/**
+	 * Remembers, for the life of the browser tab, which checkout was already counted. A storage that
+	 * refuses (private mode) counts every time, as before: never a lost step.
+	 *
+	 * @param {?{getItem:function, setItem:function, removeItem:function}} storage
+	 * @param {string} key
+	 */
+	function dfssOnceGate(storage, key) {
+		return {
+			seen: function (signature) {
+				try {
+					return !!storage && storage.getItem(key) === signature;
+				} catch (e) {
+					return false;
+				}
+			},
+			remember: function (signature) {
+				try { storage.setItem(key, signature); } catch (e) {}
+			},
+			clear: function () {
+				try { storage.removeItem(key); } catch (e) {}
+			}
+		};
+	}
+
+	// Where a payment is entered on a checkout page, classic or blocks: the payment box and the
+	// express buttons (wallets). Card fields and wallet buttons live in frames of the payment
+	// provider, whose clicks the page never sees.
+	var DFSS_PAYMENT_AREAS = '#payment, .woocommerce-checkout-payment, [id*="express-checkout"], '
+		+ '.wc-block-components-express-payment, .wc-block-checkout__payment-method';
+
+	/**
+	 * Whether the element that just took the focus is a payment frame.
+	 *
+	 * @param {?Element} el document.activeElement after the window lost the focus
+	 */
+	function dfssIsPaymentFrame(el) {
+		if (!el || String(el.tagName).toUpperCase() !== 'IFRAME' || typeof el.closest !== 'function') {
+			return false;
+		}
+		try {
+			return !!el.closest(DFSS_PAYMENT_AREAS);
+		} catch (e) {
+			return false;
+		}
+	}
+	// ---- DFSS_TEST_EXPORT_FUNNEL_END
 
 	// ---- hold until consent: a refusal is never held, only a missing answer --------
 
@@ -1580,15 +1832,7 @@
 	}
 
 	function sendBeaconNow(payload) {
-		if (!navigator.sendBeacon) {
-			return false;
-		}
-		try {
-			var url = REST + (REST.indexOf('?') === -1 ? '?' : '&') + '_wpnonce=' + encodeURIComponent(NONCE);
-			return navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
-		} catch (e) {
-			return false;
-		}
+		return TRANSPORT.beaconNow(payload);
 	}
 
 	// Page-load events go out together: one request, one WordPress boot, instead of one per event.
@@ -1605,7 +1849,7 @@
 		if (document.visibilityState === 'hidden' && sendBeaconNow(payload)) {
 			return;
 		}
-		sendWithFetch(payload, false);
+		sendWithFetch(payload);
 	}
 
 	try {
@@ -1647,12 +1891,13 @@
 			if (sendBeaconNow(JSON.stringify(body))) {
 				return;
 			}
-			sendWithFetch(JSON.stringify(body), false);
+			sendWithFetch(JSON.stringify(body));
 			return;
 		}
-		// Nonce-gated events go alone, so a stale-nonce retry never resends a whole batch.
+		// Nonce-gated events go alone: the plugin's own "nonce" refusal is then retried for that
+		// event only, never for a batch part of which was already accepted.
 		if (NONCE_EVENTS.indexOf(name) !== -1) {
-			sendWithFetch(JSON.stringify(body), false);
+			sendWithFetch(JSON.stringify(body));
 			return;
 		}
 		batch.push(body);
@@ -1663,27 +1908,9 @@
 		}
 	}
 
-	// fetch with the nonce header. A "nonce" refusal on a cached page is retried once with a fresh one.
-	function sendWithFetch(payload, retried) {
-		try {
-			fetch(REST, {
-				method: 'POST',
-				keepalive: true,
-				credentials: 'same-origin',
-				headers: {
-					'Content-Type': 'application/json',
-					'X-WP-Nonce': NONCE
-				},
-				body: payload
-			}).then(function (r) {
-				if (retried || !r || !r.ok) { return; }
-				return r.json().then(function (j) {
-					if (j && j.ok === false && j.reason === 'nonce') {
-						refreshNonce(function () { sendWithFetch(payload, true); });
-					}
-				}).catch(function () {});
-			}).catch(function () {});
-		} catch (e) {}
+	// fetch, with the retries a refused token calls for (dfssTransport).
+	function sendWithFetch(payload) {
+		TRANSPORT.post(payload);
 	}
 
 	// ---- track(): one event id, shared by the client tag and the server event ------
@@ -1768,10 +1995,18 @@
 		});
 	}
 
-	// initiate_checkout on the checkout page, context in EVENTS.checkout.
+	// initiate_checkout on the checkout page, context in EVENTS.checkout. Counted once per basket:
+	// a reload, or the same basket shown on the cart page then on the checkout page, is one step.
+	var CHECKOUT_GATE = dfssOnceGate((function () {
+		try { return window.sessionStorage; } catch (e) { return null; }
+	})(), '_dfss_checkout');
 	function trackInitiateCheckout() {
 		var c = EVENTS.checkout;
 		if (!c) {
+			return;
+		}
+		var signature = dfssCheckoutSignature(c);
+		if (CHECKOUT_GATE.seen(signature)) {
 			return;
 		}
 		var products = (c.products || []).map(function (p) {
@@ -1793,10 +2028,14 @@
 				products: products
 			}
 		});
+		// Remembered only once it really left: a visitor who has not answered the banner yet is
+		// counted on the page where they accept, not silently dropped.
+		whenConsent(function () { CHECKOUT_GATE.remember(signature); });
 	}
 
-	// add_payment_info, fired once the customer interacts with a payment method on the checkout page
-	// (best-effort, classic checkout).
+	// add_payment_info, fired once the customer interacts with a payment method on the checkout
+	// page: a method chosen, a card field or a wallet button entered (frames of the payment
+	// provider), the order submitted.
 	var paymentInfoSent = false;
 	function wireAddPaymentInfo() {
 		var c = EVENTS.checkout;
@@ -1848,6 +2087,15 @@
 				onPay();
 			}
 		}, true);
+		// A click inside a frame never reaches the page: the page only sees its window lose the
+		// focus, and the frame become the active element.
+		window.addEventListener('blur', function () {
+			setTimeout(function () {
+				if (dfssIsPaymentFrame(document.activeElement)) {
+					onPay();
+				}
+			}, 0);
+		});
 	}
 
 	function trackPurchase() {
@@ -1855,6 +2103,7 @@
 		if (!p || !p.eventId) {
 			return;
 		}
+		CHECKOUT_GATE.clear();
 		var products = (p.products || []).map(function (it) {
 			return { id: String(it.id), name: it.name, price: num(it.price), quantity: num(it.quantity) };
 		});

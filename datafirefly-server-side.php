@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.32.0
+ * Version:           2.33.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -33,7 +33,7 @@ if (defined('DFSS_VERSION')) {
     return;
 }
 
-define('DFSS_VERSION', '2.32.0');
+define('DFSS_VERSION', '2.33.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -589,6 +589,9 @@ class DFSS_Plugin
             'nonce' => wp_create_nonce('wp_rest'),
             // Fresh nonce source for pages served from a full-page cache.
             'nonceUrl' => esc_url_raw(rest_url(DFSS_REST::REST_NAMESPACE . '/nonce')),
+            // WordPress core's own source for a signed-in customer's token (admin-ajax "rest-nonce"):
+            // the tracker turns to it when the page carries a token that is not this customer's.
+            'accountNonceUrl' => esc_url_raw(admin_url('admin-ajax.php?action=rest-nonce', 'relative')),
             // The tracker only beacons what the endpoint accepts, and batches what needs no nonce.
             'beaconEvents' => DFSS_Event_Builder::BEACON_EVENTS,
             'nonceEvents' => DFSS_REST::NONCE_REQUIRED_EVENTS,
