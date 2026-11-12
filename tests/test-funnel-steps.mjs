@@ -1,9 +1,10 @@
 /**
  * Deux etapes du tunnel etaient mal comptees sur datafirefly.com (releve du 12/11/2026).
  *
- * Debut de commande : 47 evenements sur 194 etaient des repetitions. La page de commande le
- * renvoyait a chaque chargement, et le meme panier affiche sur la page panier puis sur la page de
- * commande en donnait deux. Il est compte une fois par panier.
+ * Debut de commande : depuis le 05/10, 38 evenements sur 127 repetaient le meme panier (meme
+ * montant, memes lignes) moins de 30 minutes apres le precedent. La page de commande le renvoyait
+ * a chaque chargement, et le meme panier affiche sur la page panier puis sur la page de commande
+ * en donnait deux. Il est compte une fois par panier.
  *
  * Saisie du paiement : elle ne partait qu'au choix d'un moyen de paiement ou au clic sur le bouton
  * de commande. Les champs de carte et les boutons de portefeuille (Apple Pay, Google Pay, Link)
