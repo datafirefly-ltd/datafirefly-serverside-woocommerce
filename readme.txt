@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.33.0
+Stable tag: 2.34.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,12 @@ The core tracker is about 10 KB compressed, loaded deferred in the footer. Each 
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.34.0 =
+* New: a visitor whose browser does not load Google's tag (content blocker, DNS filtering) is no longer counted by Google Analytics as a new user at every page view. With no `_ga` cookie the events left without a client id, and one was made up per event further down the line. The tracker now makes the id itself, once, and keeps it in a first-party cookie of your shop, `_dfss_cid`: a random number and the second it was drawn, with nothing of the device, the address or the browser in it. Measured on a shop over two weeks, 4.4 % of the events sent to Google Analytics were concerned, and one purchase in twenty-two.
+* Privacy: that cookie is written only for a visitor who accepted advertising and did not refuse audience measurement, never before. It lasts 90 days from its creation and is not renewed. It is removed as soon as the visitor refuses advertising or audience measurement, on the page where they refuse. It is listed here so you can add it to your cookie policy.
+* Changed: one visitor, one id. Once the shop's own id exists it is kept, even if Google's tag writes its own cookie afterwards: in basic consent mode that tag only loads after the visitor accepts, so their first event always left before Google's cookie existed. A visitor who already has Google's cookie and none of ours keeps Google's, as before.
+* The purchase sent from the server carries the same id as the page views: checkout keeps the cookie on the order when, and only when, it is exactly one the tracker wrote.
 
 = 2.33.0 =
 * Fix: the steps a signed-in customer triggers with a click (add to cart, payment details) now arrive. On a customer's first interaction the tracker asked WordPress for a fresh security token without presenting the one it had, and received a visitor's token. WordPress then refused every later event from that customer before the plugin could see it, and the refusal was never retried. Orders were not affected (they are sent by the server), which is why a funnel could show purchases without an add to cart. The token is now asked with the current one, so the customer keeps their own.

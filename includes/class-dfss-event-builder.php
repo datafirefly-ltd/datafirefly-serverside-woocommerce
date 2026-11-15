@@ -516,7 +516,7 @@ class DFSS_Event_Builder
         if ($obref) {
             $u['obref'] = $obref;
         }
-        $client_id = self::ga_client_id($order->get_meta('_dfss_ga'));
+        $client_id = self::order_client_id($order->get_meta('_dfss_ga'), $order->get_meta('_dfss_cid'));
         if ($client_id !== '') {
             $u['clientId'] = $client_id;
         }
@@ -597,6 +597,43 @@ class DFSS_Event_Builder
         }
 
         return $parts[count($parts) - 2] . '.' . $parts[count($parts) - 1];
+    }
+
+    /**
+     * The GA4 client id of the shopper, from what checkout kept on the order, by the tracker's own
+     * rule (DFSS_CID in assets/dfss-tracker.js): the storefront's own id (`_dfss_cid`) once the
+     * tracker made one, otherwise the one inside Google's `_ga` cookie. One shopper, one id: the
+     * purchase must carry the id their page views carried.
+     *
+     * @param mixed $ga  The `_dfss_ga` order meta (the `_ga` cookie value).
+     * @param mixed $own The `_dfss_cid` order meta.
+     *
+     * @return string '' if neither is usable.
+     */
+    public static function order_client_id($ga, $own)
+    {
+        $client_id = self::own_client_id($own);
+
+        return $client_id !== '' ? $client_id : self::ga_client_id($ga);
+    }
+
+    /**
+     * The storefront's own GA4 client id, or '' when the value is not exactly what the tracker
+     * writes: an unsigned 32-bit number, a dot, ten digits of seconds. Mirrors DFSS_CID.isOwn() in
+     * assets/dfss-tracker.js. The server only reads this cookie; the tracker alone makes it, and
+     * only for a shopper who accepted advertising and did not refuse audience measurement.
+     *
+     * @param mixed $raw
+     *
+     * @return string
+     */
+    public static function own_client_id($raw)
+    {
+        if (!is_string($raw) || preg_match('/\A[1-9]\d{0,9}\.\d{10}\z/', $raw) !== 1) {
+            return '';
+        }
+
+        return (int) explode('.', $raw)[0] <= 4294967295 ? $raw : '';
     }
 
     /**

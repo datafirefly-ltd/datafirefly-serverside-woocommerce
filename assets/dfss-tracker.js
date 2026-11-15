@@ -663,14 +663,9 @@
 		if (oppref) { u.oppref = oppref; }
 		var obref = getCookie('__obref');
 		if (obref) { u.obref = obref; }
-		var ga = getCookie('_ga');
-		if (ga) {
-			// _ga is "GA1.2.<clientId>"; the dispatcher wants the <clientId> part.
-			var parts = ga.split('.');
-			if (parts.length >= 4) {
-				u.clientId = parts[parts.length - 2] + '.' + parts[parts.length - 1];
-			}
-		}
+		// Google's `_ga` first; the storefront's own id when Google's tag did not load.
+		var clientId = dfssClientId();
+		if (clientId) { u.clientId = clientId; }
 		// GA4 session id, from the _ga_<container> cookie ("GS1.1.<sessionId>.<n>...").
 		var mid = PUBLIC.ga4 && PUBLIC.ga4.measurementId;
 		if (mid) {
@@ -683,6 +678,203 @@
 		return u;
 	}
 
+	/**
+	 * The GA4 client id of this visitor: the one inside Google's `_ga` cookie, or,
+	 * when the browser did not load Google's tag, the storefront's own
+	 * (`_dfss_cid`, see the DFSS-CLIENT-ID block below). Ours is only made for a
+	 * visitor who accepted advertising and did not refuse audience measurement.
+	 */
+	function dfssClientId() {
+		return DFSS_CID.read({
+			getCookie: getCookie,
+			setCookie: setCookie,
+			marketing: hasMarketingConsent(),
+			marketingRefused: marketingConsentState() === false,
+			analytics: analyticsConsentState()
+		});
+	}
+
+	// ---- DFSS-CLIENT-ID:BEGIN (generated — do not edit here) --------------
+	/**
+	 * The storefront's own GA4 client id, shared verbatim by the three storefront
+	 * trackers (WooCommerce, PrestaShop, Shopware).
+	 *
+	 * GA4 wants a client id on every event. It normally comes from the `_ga`
+	 * cookie, which Google's tag writes. A visitor whose browser does not load
+	 * that tag (content blocker, DNS filtering) has no `_ga`: the event left
+	 * without an id, and the dispatcher made one up per event, so GA4 counted a
+	 * new user at every page view (4.4 % of a merchant's events, measured
+	 * 31/10 to 13/11/2026). Here the storefront makes the id itself, once, and
+	 * keeps it in a cookie of its own.
+	 *
+	 * This writes on the visitor's device. Every line below is a condition of the
+	 * decision of 15/11/2026, held by tests/clientIdShared.test.ts:
+	 *
+	 *   G1. Nothing is created, and our cookie is not even read, before the
+	 *       visitor accepted advertising.
+	 *   G2. Nothing is created when audience measurement is refused; a cookie
+	 *       already there is removed, as it is when advertising is refused.
+	 *   G3. One visitor, one id. Ours is not created while Google's cookie is
+	 *       there; once ours exists it is kept, even if Google writes its cookie
+	 *       later (in basic consent mode Google's tag only loads after consent,
+	 *       so a first event always leaves before `_ga` exists).
+	 *   G4. A cookie that is not exactly ours is ignored and replaced.
+	 *   G5. The id is a random number and the second it was drawn: the shape of a
+	 *       `_ga` client id, with nothing of the device, the address or the
+	 *       browser in it. No fingerprint.
+	 *
+	 * The source is server-side/shared/client-id.js, copied by
+	 * scripts/sync-consent-core.py. Do not edit the copies: they are overwritten,
+	 * and `--check` fails when one drifts.
+	 */
+	var DFSS_CID = (function () {
+		'use strict';
+
+		var COOKIE = '_dfss_cid';
+		// From its creation, not renewed: the id lives 90 days at most, like the
+		// click-id cookies (_dfss_gclid...) the trackers already write.
+		var DAYS = 90;
+		var NOTHING = { clientId: '', write: '', drop: false };
+
+		/** The client id inside a `_ga` cookie ("GA1.2.<a>.<b>"), or ''. */
+		function fromGa(raw) {
+			if (typeof raw !== 'string' || raw === '') {
+				return '';
+			}
+			var parts = raw.split('.');
+			if (parts.length < 4) {
+				return '';
+			}
+
+			return parts[parts.length - 2] + '.' + parts[parts.length - 1];
+		}
+
+		/** Exactly what make() writes: an unsigned 32-bit number, a dot, ten digits of seconds (G4). */
+		function isOwn(value) {
+			if (typeof value !== 'string' || !/^[1-9]\d{0,9}\.\d{10}$/.test(value)) {
+				return false;
+			}
+
+			return Number(value.split('.')[0]) <= 4294967295;
+		}
+
+		/** An unsigned 32-bit draw from the browser, when the caller injects none. */
+		function draw() {
+			try {
+				if (typeof crypto !== 'undefined' && crypto && typeof crypto.getRandomValues === 'function') {
+					return crypto.getRandomValues(new Uint32Array(1))[0];
+				}
+			} catch (e) {}
+
+			return Math.floor(Math.random() * 4294967296);
+		}
+
+		/** A new id, or '' when the draw or the clock cannot be trusted (G5). */
+		function make(random, nowMs) {
+			var n = Math.floor(Number(typeof random === 'function' ? random() : draw()));
+			var seconds = Math.floor(Number(nowMs) / 1000);
+			if (!isFinite(n) || n < 0 || n > 4294967295 || !isFinite(seconds)) {
+				return '';
+			}
+			var id = (n === 0 ? 1 : n) + '.' + seconds;
+
+			return isOwn(id) ? id : '';
+		}
+
+		/**
+		 * What to send and what to do with our cookie. Pure: nothing is read or
+		 * written here.
+		 *
+		 *   state.ga                `_ga` cookie value, or ''
+		 *   state.own               `_dfss_cid` cookie value, or ''
+		 *   state.marketing         true when advertising consent is granted
+		 *   state.marketingRefused  true when it was explicitly refused (not merely unanswered)
+		 *   state.analytics         true granted, false refused, null when the tool does not say
+		 *   state.random, state.nowMs  injected in tests; the browser's otherwise
+		 *
+		 * Returns { clientId, write, drop }: the id to send ('' for none), the value
+		 * to write in our cookie ('' for no write), whether to remove our cookie.
+		 */
+		function resolve(state) {
+			try {
+				if (!state || typeof state !== 'object') {
+					return NOTHING;
+				}
+				// G2. A refusal removes our cookie, whatever else is on the device.
+				// "Audience measurement: no" is a refusal only next to an accepted
+				// advertising consent: several tools answer false, not null, while
+				// the banner is still unanswered.
+				var noAudience = state.analytics === false;
+				var refused = state.marketingRefused === true || (state.marketing === true && noAudience);
+				var drop = refused && typeof state.own === 'string' && state.own !== '';
+
+				var allowed = !refused && state.marketing === true;
+				// G3. One visitor, one id: ours is kept once it exists, even when
+				// Google writes its cookie later. In basic consent mode Google's tag
+				// only loads after the visitor accepts, so their first event leaves
+				// before `_ga` exists; switching to `_ga` on the next page would make
+				// two GA4 users out of one visitor.
+				if (allowed && isOwn(state.own)) {
+					return { clientId: state.own, write: '', drop: false };
+				}
+				// Google's own id, exactly as before this block existed.
+				var google = fromGa(state.ga);
+				if (google) {
+					return { clientId: google, write: '', drop: drop };
+				}
+				// G1, G2.
+				if (!allowed) {
+					return { clientId: '', write: '', drop: drop };
+				}
+				// G4, G5.
+				var made = make(state.random, state.nowMs);
+
+				return made ? { clientId: made, write: made, drop: false } : NOTHING;
+			} catch (e) {
+				return NOTHING;
+			}
+		}
+
+		/**
+		 * The one call a tracker makes when it gathers the identifiers of an event:
+		 * returns the client id to send ('' for none) and keeps our cookie in step.
+		 *
+		 *   io.getCookie(name), io.setCookie(name, value, days)  the tracker's own
+		 *   io.marketing, io.marketingRefused, io.analytics       see resolve()
+		 */
+		function read(io) {
+			try {
+				if (!io || typeof io.getCookie !== 'function') {
+					return '';
+				}
+				var marketing = io.marketing === true;
+				var verdict = resolve({
+					ga: io.getCookie('_ga'),
+					// G1: our cookie is not read before advertising consent, unless to remove it on a refusal.
+					own: marketing || io.marketingRefused === true ? io.getCookie(COOKIE) : '',
+					marketing: marketing,
+					marketingRefused: io.marketingRefused === true,
+					analytics: io.analytics,
+					random: io.random,
+					nowMs: typeof io.nowMs === 'number' ? io.nowMs : Date.now()
+				});
+				if (typeof io.setCookie === 'function') {
+					if (verdict.drop) {
+						io.setCookie(COOKIE, '', -1);
+					} else if (verdict.write) {
+						io.setCookie(COOKIE, verdict.write, DAYS);
+					}
+				}
+
+				return verdict.clientId;
+			} catch (e) {
+				return '';
+			}
+		}
+
+		return { COOKIE: COOKIE, DAYS: DAYS, fromGa: fromGa, isOwn: isOwn, resolve: resolve, read: read };
+	})();
+	// ---- DFSS-CLIENT-ID:END ---------------------------------------------
 	// ---- DFSS-CONSENT-CORE:BEGIN (generated — do not edit here) --------------
 	/**
 	 * Marketing-consent detection, shared verbatim by the three storefront
@@ -1623,6 +1815,8 @@
 
 	function flushPending() {
 		if (marketingConsentState() === false) {
+			// The storefront's own GA4 id does not outlive a refusal (DFSS-CLIENT-ID, G2).
+			dfssClientId();
 			heldClear();
 
 			return;
@@ -1643,8 +1837,22 @@
 			return;
 		}
 		consentListenersBound = true;
+		// A visitor who refused on an earlier page: removes the storefront's own GA4 id,
+		// reads nothing when the banner is simply unanswered (DFSS-CLIENT-ID, G1 and G2).
+		dfssClientId();
 		DFSS_CMP.bind(flushPending, CONSENT);
 	}
+
+	// The storefront's own GA4 id must not outlive a refusal given later on the same page
+	// (DFSS-CLIENT-ID, G2). By then nothing waits for consent any more, so the listeners above
+	// were never bound: this one always is. It removes, it never creates.
+	try {
+		DFSS_CMP.bind(function () {
+			if (!hasMarketingConsent() || analyticsConsentState() === false) {
+				dfssClientId();
+			}
+		}, CONSENT);
+	} catch (e) {}
 
 	// ---- browser tags (public ids only) ------------------------------------------
 

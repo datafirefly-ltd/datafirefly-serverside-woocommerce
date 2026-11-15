@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.33.0
+ * Version:           2.34.0
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -33,7 +33,7 @@ if (defined('DFSS_VERSION')) {
     return;
 }
 
-define('DFSS_VERSION', '2.33.0');
+define('DFSS_VERSION', '2.34.0');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -331,6 +331,14 @@ class DFSS_Plugin
         foreach ($map as $cookie => $meta) {
             if (!empty($_COOKIE[$cookie])) {
                 $order->update_meta_data($meta, sanitize_text_field(wp_unslash($_COOKIE[$cookie])));
+            }
+        }
+        // The storefront's own GA4 client id, which the tracker makes when Google's tag did not load
+        // in this browser (no _ga). Kept only when it is exactly one of ours; never made here.
+        if (!empty($_COOKIE['_dfss_cid'])) {
+            $own_client_id = DFSS_Event_Builder::own_client_id(sanitize_text_field(wp_unslash($_COOKIE['_dfss_cid'])));
+            if ($own_client_id !== '') {
+                $order->update_meta_data('_dfss_cid', $own_client_id);
             }
         }
         // Our own 90-day click-id cookies, as a fallback when the platform cookie is absent.

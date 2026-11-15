@@ -29,13 +29,22 @@ const gcl = src.match(/\/\/ ---- DFSS_TEST_EXPORT_GCL_START[\s\S]*?\/\/ ---- DFS
 assert.ok(gcl, 'bloc DFSS_TEST_EXPORT_GCL introuvable dans le tracker');
 const collect = src.match(/\tfunction collectUserData\(\) \{[\s\S]*?\n\t\}\n/);
 assert.ok(collect, 'collectUserData introuvable dans le tracker');
+const cid = src.match(/\t\/\/ ---- DFSS-CLIENT-ID:BEGIN[\s\S]*?\/\/ ---- DFSS-CLIENT-ID:END[^\n]*/);
+assert.ok(cid, 'bloc DFSS-CLIENT-ID introuvable dans le tracker');
+const glue = src.match(/\tfunction dfssClientId\(\) \{[\s\S]*?\n\t\}\n/);
+assert.ok(glue, 'dfssClientId introuvable dans le tracker');
 
 const value = new Function(gcl[0] + '\nreturn dfssGclCookieValue;')();
 
 /** collectUserData du traqueur, avec ces cookies-la. */
 function userData(cookies, ga4 = null) {
-  const make = new Function('getCookie', 'PUBLIC', gcl[0] + '\n' + collect[0] + '\nreturn collectUserData;');
-  return make((name) => (Object.prototype.hasOwnProperty.call(cookies, name) ? cookies[name] : ''), { ga4 })();
+  // collectUserData lit aussi l'identifiant GA4 (bloc DFSS-CLIENT-ID, eprouve par tests/test-client-id.mjs) :
+  // on lui donne le vrai bloc et un visiteur qui a tout accepte, sans cookie ecrit.
+  const make = new Function(
+    'getCookie', 'PUBLIC', 'setCookie', 'hasMarketingConsent', 'marketingConsentState', 'analyticsConsentState',
+    gcl[0] + '\n' + cid[0] + '\n' + glue[0] + '\n' + collect[0] + '\nreturn collectUserData;'
+  );
+  return make((name) => (Object.prototype.hasOwnProperty.call(cookies, name) ? cookies[name] : ''), { ga4 }, () => {}, () => true, () => true, () => true)();
 }
 
 let ok = 0;
