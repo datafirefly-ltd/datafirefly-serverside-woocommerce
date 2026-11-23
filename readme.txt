@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.34.0
+Stable tag: 2.34.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -34,7 +34,7 @@ What is sent, and when:
 * Once a night: the number of orders and their total for the previous day, so the service can tell you what it received against what your shop actually sold.
 * When you open the settings screen: a request for the public identifiers of your enabled destinations (pixel ids and measurement ids), so the plugin can fire the matching browser tags.
 
-Every request is signed with a secret that stays on your server and is never exposed to the browser. The endpoint is https://serverside.datafirefly.com.
+Every request also carries the plugin's version number, so the service can tell you when your copy is behind. Every request is signed with a secret that stays on your server and is never exposed to the browser. The endpoint is https://serverside.datafirefly.com.
 
 DataFirefly then forwards the events, on your behalf and according to what you enabled in your DataFirefly account, to the advertising and analytics platforms you configured there: Meta, Google Analytics 4, Google Ads, TikTok, Pinterest, Microsoft Advertising and OpenAI.
 
@@ -63,6 +63,9 @@ The core tracker is about 10 KB compressed, loaded deferred in the footer. Each 
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.34.1 =
+* New: the plugin tells the service which version of it is running, so your DataFirefly console can say when your copy is behind. The version number travels with each signed request and nothing else changes: no new request, nothing about your visitors, and the events are the same to the byte.
 
 = 2.34.0 =
 * New: a visitor whose browser does not load Google's tag (content blocker, DNS filtering) is no longer counted by Google Analytics as a new user at every page view. With no `_ga` cookie the events left without a client id, and one was made up per event further down the line. The tracker now makes the id itself, once, and keeps it in a first-party cookie of your shop, `_dfss_cid`: a random number and the second it was drawn, with nothing of the device, the address or the browser in it. Measured on a shop over two weeks, 4.4 % of the events sent to Google Analytics were concerned, and one purchase in twenty-two.

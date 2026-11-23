@@ -203,6 +203,12 @@ class DFSS_Client
             'X-Dfss-Signature-Version' => '2',
             'X-Dfss-Signature' => $signature,
         );
+        // Which connector, and which version of it, is speaking: without it the console cannot tell a
+        // shop that runs behind from one that is up to date. A header and not a payload field: it
+        // describes the sender, not the event. Not part of the signature.
+        if (defined('DFSS_VERSION')) {
+            $headers['X-Dfss-Integration'] = 'woocommerce/' . DFSS_VERSION;
+        }
         // Queue health, so the dispatcher can see a shop whose retries run late (WP-Cron without
         // visitors, a dispatcher outage). Computed once per request, and left out when the queue
         // cannot be read: an unknown queue is not an empty one. Not part of the signature.
