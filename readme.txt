@@ -4,7 +4,7 @@ Tags: woocommerce, tracking, conversion api, facebook pixel, ga4
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.34.1
+Stable tag: 2.34.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,10 @@ The core tracker is about 10 KB compressed, loaded deferred in the footer. Each 
 Yes. When "Require consent" is on (default), no tag is injected and no event is sent until marketing consent is granted, with live re-check when the visitor accepts.
 
 == Changelog ==
+
+= 2.34.2 =
+* Fix: on a shop, only a product page counts as a product view. Every page and every article was also sent as `view_content`, which Google Analytics receives as `view_item`: the cart, the account and the home page appeared among the products viewed, and the share of visitors who add to cart looked lower than it is. Measured on a shop over four weeks, two thirds of the product views were not products. After the update the number of product views goes down at once and the past is not rewritten: compare your figures from that day on. Meta, TikTok, Pinterest, Microsoft Ads and ChatGPT Ads no longer receive a content view for those pages; page views, lists, cart, checkout and purchases are unchanged.
+* A site without WooCommerce is not concerned: reading a page or an article is still reported, as before.
 
 = 2.34.1 =
 * New: the plugin tells the service which version of it is running, so your DataFirefly console can say when your copy is behind. The version number travels with each signed request and nothing else changes: no new request, nothing about your visitors, and the events are the same to the byte.

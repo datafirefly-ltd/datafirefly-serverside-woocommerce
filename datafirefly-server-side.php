@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       DataFirefly Server-Side
  * Description:       Complete WooCommerce tracking: client + server, full-funnel, deduplicated, GDPR-aware, reliable. One key configures everything; no destination credentials ever reach the browser.
- * Version:           2.34.1
+ * Version:           2.34.2
  * Author:            DataFirefly Ltd
  * Author URI:        https://datafirefly.com
  * Requires PHP:      7.4
@@ -33,7 +33,7 @@ if (defined('DFSS_VERSION')) {
     return;
 }
 
-define('DFSS_VERSION', '2.34.1');
+define('DFSS_VERSION', '2.34.2');
 define('DFSS_PLUGIN_FILE', __FILE__);
 define('DFSS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DFSS_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -669,9 +669,10 @@ class DFSS_Plugin
     {
         $ctx = array();
 
-        // view_content on a content page (article, service page...). Built even without WooCommerce;
-        // products report view_item below instead.
-        if (is_singular() && !(function_exists('is_product') && is_product())) {
+        // view_content on a content page (article, service page...), on a site WITHOUT a shop only.
+        // It is GA4's view_item: on a shop it counted the cart, the account and the home page as
+        // products seen. There, a product reports it below and a page has its page_view.
+        if (!function_exists('is_product') && is_singular()) {
             $dfss_post = get_queried_object();
             if ($dfss_post instanceof WP_Post) {
                 $ctx['content'] = array(
